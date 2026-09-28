@@ -121,3 +121,43 @@ test("quick-slots start filled and follow stacks", async () => {
   addItem(c, fresh)
   assert.equal(itemForSlot(c, c.quickslots[8]), fresh, "a new stack of the same potion refills the slot")
 })
+
+test("music: moods, keys and the main theme", async () => {
+  const { pickMood, generatePhrase, degreeToMidi, MAIN_THEME, PRESETS } = await import("../src/logic/musictheory.js")
+  assert.equal(pickMood({ mode: "title" }).key, "title")
+  assert.equal(pickMood({ mode: "play", area: "overworld", region: "ashlands" }).key, "ashlands")
+  assert.equal(pickMood({ mode: "play", area: "overworld", region: "ashlands", inTown: true }).key, "town")
+  assert.equal(pickMood({ mode: "play", area: "dungeon", theme: "dwemer" }).key, "dwemer")
+  const calm = pickMood({ mode: "play", region: "grazelands" })
+  const fight = pickMood({ mode: "play", region: "grazelands", combat: 1 })
+  assert.equal(calm.layers.drums, 0)
+  assert.ok(fight.layers.drums > 0.9 && fight.bpm > calm.bpm)
+  assert.ok(pickMood({ mode: "play", area: "dungeon", theme: "citadel", combat: 1, boss: true }).layers.choir > 0.5)
+  // D dorian: degree 0 is D, degree 4 is A, degree 7 is the octave
+  assert.equal(degreeToMidi(38, "dorian", 0), 38)
+  assert.equal(degreeToMidi(38, "dorian", 4), 45)
+  assert.equal(degreeToMidi(38, "dorian", 7), 50)
+  assert.equal(degreeToMidi(38, "dorian", -1), 36)
+  // the theme is 32 beats (8 bars of 4/4)
+  assert.equal(MAIN_THEME.reduce((a, [, b]) => a + b, 0), 32)
+  for (const key of Object.keys(PRESETS)) {
+    const a = generatePhrase(7, key, 3, PRESETS[key].density)
+    assert.deepEqual(a, generatePhrase(7, key, 3, PRESETS[key].density))
+    assert.equal(a.length, 4)
+    for (const bar of a) for (const n of bar.notes) assert.ok(n.beat >= 0 && n.beat + n.beats <= 4.001)
+  }
+})
+
+test("audio helpers: body materials, weapon classes, greeting lines", async () => {
+  const { bodyMaterial, weaponClass } = await import("../src/audio/sfx.js")
+  const { CREATURES } = await import("../src/data/creatures.js")
+  const { greetingLine } = await import("../src/audio/voice.js")
+  assert.equal(bodyMaterial(CREATURES.skeleton), "bone")
+  assert.equal(bodyMaterial(CREATURES.centurionSphere), "metal")
+  assert.equal(bodyMaterial(CREATURES.mudcrab), "chitin")
+  assert.equal(bodyMaterial(CREATURES.ancestorGhost), "ghost")
+  assert.equal(bodyMaterial(CREATURES.kagouti), "flesh")
+  assert.equal(weaponClass(null), "fist")
+  assert.equal(weaponClass({ skill: "bluntWeapon" }), "blunt")
+  assert.equal(greetingLine("What do you want, n'wah? Go away."), "What do you want, n'wah?")
+})

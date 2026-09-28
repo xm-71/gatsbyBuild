@@ -10,6 +10,36 @@ import { Projectile, ELEMENT_COLOR } from "./actors.js"
 import { RNG } from "../core/rng.js"
 import { randomLoot } from "../logic/items.js"
 import { DUNGEON_THEMES } from "../logic/dungeongen.js"
+import { weaponClass } from "../audio/sfx.js"
+
+const REGION_SURFACE = { ashlands: "ash", redMountain: "ash", molagAmur: "ash", bitterCoast: "mud", azurasCoast: "gravel", westGash: "grass", ascadian: "grass", grazelands: "grass" }
+const DUNGEON_SURFACE = { cave: "gravel", tomb: "stone", dwemer: "metal", daedric: "stone", citadel: "flesh" }
+
+// What the player is standing on, for footstep sounds.
+export function surfaceUnder(game) {
+  const pc = game.pc
+  const area = game.area
+  if (pc.swimming) return "water"
+  if (area.kind === "dungeon") return DUNGEON_SURFACE[area.dungeon.type] || "stone"
+  if (pc.pos.y < SEA_LEVEL + 0.15) return "water"
+  const w = game.world
+  if (pc.pos.y > w.heightAt(pc.pos.x, pc.pos.z) + 0.4) return "wood" // docks, stairs and floors
+  const town = area.townAt(pc.pos.x, pc.pos.z)
+  if (town) return Math.hypot(pc.pos.x - town.x, pc.pos.z - town.z) < town.radius * 0.45 ? "stone" : "gravel"
+  return REGION_SURFACE[w.regionAt(pc.pos.x, pc.pos.z)] || "grass"
+}
+
+// 0 (cloth) .. 1 (full heavy armour): how weighty footsteps sound.
+export function armorWeight(c) {
+  const share = { cuirass: 0.4, greaves: 0.2, boots: 0.2, helm: 0.1, gauntlets: 0.1 }
+  let w = 0
+  for (const [slot, k] of Object.entries(share)) {
+    const it = c.equipment[slot]
+    if (it?.armorClass === "heavyArmor") w += k
+    else if (it?.armorClass === "mediumArmor") w += k * 0.5
+  }
+  return w
+}
 
 const FIST = { damage: [1, 3], speed: 1.5, reach: 1.7, skill: "handToHand", weight: 0 }
 
@@ -134,7 +164,7 @@ export function updatePlayer(game, dt) {
     pc.stepT -= dt * (sprint ? 1.6 : 1)
     if (pc.stepT <= 0) {
       pc.stepT = 0.5
-      game.audio.play("step")
+      game.audio.step(surfaceUnder(game), armorWeight(c), null, pc.sneaking ? 0.4 : sprint ? 1.3 : 1)
     }
     if (pc.sneaking && area.enemies.some(e => !e.dead && !e.aware && e.pos.distanceTo(pc.pos) < 20)) game.exercise("sneak", dt * 0.25)
   }
@@ -186,7 +216,7 @@ function updateAttack(game, dt) {
       if (w.ranged) fireArrow(game, w, charge)
       else {
         game.viewmodel.swing = 1
-        game.audio.play("swing")
+        game.audio.play("swing", { weight: w.weight })
         pc.pendingHit = { t: 0.13, charge, weapon: w }
       }
     }
@@ -235,7 +265,7 @@ function meleeHit(game, w, charge) {
   if (!best) return
   const chance = hitChance(attackStats(game, w.skill), best.evasion)
   game.setTarget(best)
-  if (Math.random() > chance) return
+  if (Math.random() > chance) return game.audio.play("whiff", { pos: best.center })
   let dmg = meleeDamage(w.damage, getAttr(c, "strength"), charge)
   if (w === FIST) dmg += getSkill(c, "handToHand") / 12
   const sneak = game.pc.sneaking && !best.aware
@@ -247,7 +277,7 @@ function meleeHit(game, w, charge) {
     best.takeDamage(a, {})
     c.health = Math.min(maxHealth(c), c.health + a)
   }
-  game.audio.play("hit")
+  game.audio.hit(best.material, weaponClass(w), best.center, 0.7 + charge * 0.5)
   game.exercise(w.skill, 1)
   if (sneak && dealt > 0) game.msg("Sneak attack! Critical hit.", "#ffe080")
 }
@@ -352,7 +382,7 @@ export function castSelected(game) {
   const el = spell.effects.find(e => e.element)?.element
   const color = el ? ELEMENT_COLOR[el] : spell.school === "restoration" ? 0x80ff90 : spell.school === "illusion" ? 0xe0a0ff : 0xa0c0ff
   game.viewmodel.cast(color)
-  game.audio.play("spell")
+  game.audio.play("spell", { element: el || (spell.school === "restoration" ? "restore" : null) })
   if (spell.delivery === "self") return applySelfSpell(game, spell)
   if (spell.delivery === "touch") return applyTouchSpell(game, spell)
   const cam = game.camera.getWorldPosition(new THREE.Vector3())

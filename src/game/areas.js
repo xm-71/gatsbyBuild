@@ -236,6 +236,7 @@ export class DungeonArea {
     const built = buildDungeonMesh(lvl)
     this.look = built.look
     this.height = built.height
+    this.lights = built.lights
     this.scene.add(built.group)
     this.scene.background = new THREE.Color(this.look.fog)
     this.scene.fog = new THREE.Fog(this.look.fog, 8, 55)
@@ -287,6 +288,11 @@ export class DungeonArea {
     const SOLID = { pipe: 0.4, fleshpillar: 0.9, statue: 0.6, stalagmite: 0.5, coffin: 0.8, altar: 1.0, crate: 0.6, barrel: 0.5, brazier: 0.5, urn: 0.45 }
     this.propColliders = lvl.props.filter(p => SOLID[p.type]).map(p => ({ x: p.x * CELL + CELL / 2 + p.ox, z: p.y * CELL + CELL / 2 + p.oz, r: SOLID[p.type] }))
     this.explored = state.explored || (state.explored = new Uint8Array(lvl.w * lvl.h))
+  }
+
+  // world positions of torches and braziers, for their crackle
+  lightPositions() {
+    return this.lights.map(l => l.getWorldPosition(new THREE.Vector3()))
   }
 
   // place a doorway on a wall adjacent to the cell, facing into it

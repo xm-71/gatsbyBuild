@@ -6,6 +6,7 @@ import { buildCreatureMesh, buildNpcMesh, LodSwitch } from "../render/creatures.
 import { makeLabel } from "../render/textures.js"
 import { hitChance, evasionOf, applyArmor } from "../logic/combat.js"
 import { getAttr, getSkill } from "../logic/character.js"
+import { bodyMaterial } from "../audio/sfx.js"
 
 const ELEMENT_COLOR = { fire: 0xff6a20, frost: 0x80c8ff, shock: 0xb080ff, poison: 0x60d040, magic: 0xe0c0ff }
 export { ELEMENT_COLOR }
@@ -51,6 +52,9 @@ export class Enemy {
     this.tier = opts.tier || 1
     this.loot = null
     this.looted = false
+    this.material = bodyMaterial(base)
+    this.voiceT = 4 + Math.random() * 10
+    this.painT = 0
 
     const built = buildCreatureMesh(base)
     this.mesh = built.group
@@ -91,6 +95,10 @@ export class Enemy {
     this.aware = true
     this.calmed = 0
     if (this.hp <= 0) this.die()
+    else if (dmg > 0 && this.painT <= 0) {
+      this.painT = 0.6
+      this.game.audio.creature(this, "pain")
+    }
     return dmg
   }
 
@@ -125,6 +133,7 @@ export class Enemy {
     this.cooldown -= dt
     this.castCooldown -= dt
     this.hurtT -= dt
+    this.painT -= dt
     this.attackAnim = Math.max(0, this.attackAnim - dt * 3)
     if (this.calmed > 0) this.calmed -= dt
     if (this.paralyzed > 0) {
@@ -137,10 +146,16 @@ export class Enemy {
     const dz = pc.pos.z - this.pos.z
     const dist = Math.hypot(dx, dz)
     const dy = pc.pos.y - this.pos.y
+    this.voiceT -= dt
+    if (this.voiceT <= 0) {
+      this.voiceT = (this.aware ? 5 : 9) + Math.random() * 12
+      if (dist < 35) g.audio.creature(this, "idle")
+    }
 
     if (!this.aware && this.calmed <= 0 && !g.char.dead) {
       if (dist < this.detectRange() && (this.area.kind !== "dungeon" || this.area.los(this.pos, pc.pos))) {
         this.aware = true
+        g.audio.creature(this, "alert")
         if (this.boss) g.msg(`${this.name} has noticed you!`, "#ff9a7a")
       }
     }
@@ -244,7 +259,7 @@ export class Enemy {
     const c = g.char
     const chance = hitChance({ skill: 22 + this.level * 4, agility: this.def.agility, luck: 40, fatigue: 1 }, g.playerEvasion())
     if (Math.random() > chance) {
-      g.audio.play("swing")
+      g.audio.play("whiff", { pos: this.center })
       return
     }
     const dmg = this.dmg[0] + Math.random() * (this.dmg[1] - this.dmg[0])

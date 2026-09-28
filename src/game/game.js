@@ -63,6 +63,8 @@ export class Game {
     window.addEventListener("resize", () => this.resize())
     document.addEventListener("visibilitychange", () => document.hidden && this.autosave())
     window.addEventListener("pagehide", () => this.autosave())
+    // browsers only allow sound after a gesture: start it on the first one anywhere
+    for (const ev of ["pointerdown", "keydown"]) window.addEventListener(ev, () => this.audio.ensure(), { capture: true })
     this.renderer.domElement.addEventListener("click", () => {
       this.audio.ensure()
       if (this.mode === "play" && !this.ui.modal) this.input.lock()
@@ -208,6 +210,8 @@ export class Game {
     area.scene.environment = this.envMap
     area.scene.environmentIntensity = area.kind === "dungeon" ? 0.25 : 0.6
     area.scene.add(this.camera)
+    area.scene.updateMatrixWorld()
+    this.audio.enterArea(area)
   }
 
   // ---------- time & weather ----------
@@ -269,6 +273,7 @@ export class Game {
       for (const e of this.area.enemies) e.update(dt)
     }
     this.viewmodel.root.visible = this.mode === "play"
+    this.audio.update(dt, this)
     if (this.input.locked) this.ui.showPauseHint(false)
     this.input.endFrame()
     this.renderer.render(this.area.scene, this.camera)
@@ -341,12 +346,14 @@ export class Game {
       if (!this.knownTowns.has(t.id) && Math.hypot(t.x - this.pc.pos.x, t.z - this.pc.pos.z) < t.radius + 30) {
         this.knownTowns.add(t.id)
         this.msg(`You have discovered ${t.name}.`, "#f0d890")
+        this.audio.sting("discover")
       }
     }
     for (const d of this.world.dungeons) {
       if (!d.discovered && Math.hypot(d.x - this.pc.pos.x, d.z - this.pc.pos.z) < 30) {
         d.discovered = true
         this.msg(`Discovered: ${d.name}`, "#f0d890")
+        this.audio.sting("discover")
       }
     }
   }
@@ -399,7 +406,7 @@ export class Game {
         let diff = Math.abs(toSrc - facing)
         if (diff > Math.PI) diff = Math.PI * 2 - diff
         if (diff < 1.2 && Math.random() < blockChance(getSkill(c, "block"), getAttr(c, "agility"), getAttr(c, "luck"))) {
-          this.audio.play("block")
+          this.audio.play("block", { wood: ["netch leather", "chitin", "bonemold"].includes(shield.material) })
           this.msg("Blocked!", "#c0c0c0")
           this.exercise("block", 1)
           c.fatigue = Math.max(0, c.fatigue - 4)
@@ -433,6 +440,7 @@ export class Game {
     this.mode = "dead"
     this.input.unlock()
     this.audio.play("death")
+    this.audio.sting("death")
     this.deathCause = source ? `slain by ${source.name}` : "succumbed to their wounds"
     deleteSave()
     this.recordRun(false)
@@ -474,7 +482,7 @@ export class Game {
     const vel = target.sub(from).normalize().multiplyScalar(17)
     const el = spell.effects.find(e => e.element)?.element || "magic"
     this.projectiles.push(new Projectile(this, this.area, { pos: from, vel, owner: "enemy", spell, color: ELEMENT_COLOR[el], source: enemy }))
-    this.audio.play("spell")
+    this.audio.play("spell", { element: el, pos: from })
   }
 
   projectileImpact(p, target) {
@@ -482,7 +490,7 @@ export class Game {
       if (target && target !== "player") {
         const dealt = target.takeDamage(p.arrow.damage, { physical: true, silver: p.arrow.silver })
         if (p.arrow.enchant?.element) target.takeDamage(p.arrow.enchant.amount, { element: p.arrow.enchant.element })
-        this.audio.play("hit")
+        this.audio.hit(target.material, "arrow", target.center)
         this.exercise("marksman", 1)
         this.setTarget(target)
         if (dealt > 0 && p.arrow.sneak) this.msg("Sneak attack! Critical hit.", "#ffe080")
@@ -492,7 +500,7 @@ export class Game {
     const spell = p.spell
     const el = spell.effects.find(e => e.element)?.element || "magic"
     this.flash(p.pos, ELEMENT_COLOR[el], spell.splash ? 3 : 1)
-    this.audio.play("explode")
+    this.audio.play("explode", { element: el, pos: p.pos.clone(), size: spell.splash ? 1.6 : 1 })
     if (p.owner === "player") {
       const hits = spell.splash ? this.area.enemies.filter(e => !e.dead && e.center.distanceTo(p.pos) < spell.splash + e.radius) : target ? [target] : []
       for (const e of hits) {
@@ -554,7 +562,7 @@ export class Game {
   onEnemyKilled(e) {
     const c = this.char
     c.stats.kills++
-    this.audio.play("hit")
+    this.audio.creature(e, "death")
     const loot = []
     let gold = 0
     const tier = e.tier || 1
@@ -607,7 +615,7 @@ export class Game {
     if (this.mode !== "play") return
     this.mode = "victory"
     this.input.unlock()
-    this.audio.play("levelup")
+    this.audio.sting("victory")
     this.addJournal(`${this.world.mainQuest.dagoth} is dead and the Heart of Lorkhan is severed. The Blight will lift from Vvardenfell.`)
     deleteSave()
     this.recordRun(true)

@@ -793,6 +793,7 @@ export function buildNpcMesh(npc, race, factionColor) {
     return () => ((s = (Math.imul(s, 1103515245) + 12345) >>> 0) % 10000) / 10000
   })()
   const female = rnd() < 0.45
+  npc.female = female // the voice and greetings use it
   let [cloth, pants] = ROLE_CLOTH[npc.role] || [0x6a5a4a, 0x4a3a2a]
   if (factionColor && npc.role === "guildmaster") cloth = new THREE.Color(factionColor).getHex()
   if (npc.role === "commoner") cloth = new THREE.Color().setHSL(rnd() * 0.15 + 0.03, 0.25 + rnd() * 0.3, 0.25 + rnd() * 0.2).getHex()

@@ -38,6 +38,7 @@ function bind(root, handlers) {
 export class UI {
   constructor(game) {
     this.game = game
+    document.addEventListener("click", e => e.target.closest?.("button") && game.audio.play("click", { ui: true }), true)
     this.root = el("div", "ui-root")
     document.body.appendChild(this.root)
     this.hud = el("div", "hud hidden")
@@ -593,6 +594,7 @@ export class UI {
   // ---------------- modal plumbing ----------------
 
   openModal(kind) {
+    if (!this.modal) this.game.audio.play("open", { ui: true })
     this.modal = kind
     this.game.input.unlock()
     this.win.classList.remove("hidden")
@@ -600,6 +602,7 @@ export class UI {
   }
 
   closeModal(silent = false) {
+    if (this.modal) this.game.audio.play("close", { ui: true })
     this.modal = null
     this.dialogueNpc = null
     this.takeAll = null
@@ -784,6 +787,9 @@ export class UI {
       <section><h3>Audio</h3>
         ${range("set-music", "Music volume", 0, 1, 0.05, s.musicVolume, v => `${Math.round(v * 100)}%`)}
         ${range("set-sfx", "Effects volume", 0, 1, 0.05, s.sfxVolume, v => `${Math.round(v * 100)}%`)}
+        ${range("set-amb", "Ambience volume", 0, 1, 0.05, s.ambienceVolume, v => `${Math.round(v * 100)}%`)}
+        <label class="set-row" for="set-voice"><span>Spoken NPC greetings</span><input type="checkbox" id="set-voice" ${s.npcVoice ? "checked" : ""}></label>
+        <p class="dim small">Greetings use your browser's built-in voices, which vary by device.</p>
       </section>
       <section><h3>Interface</h3>
         <label class="set-row" for="set-compass"><span>Show compass with quest markers</span><input type="checkbox" id="set-compass" ${s.compass ? "checked" : ""}></label>
@@ -802,12 +808,14 @@ export class UI {
       body.querySelector("#" + id).addEventListener("input", e => {
         updateSettings({ [key]: parse(e.target.value) })
         const out = e.target.parentElement.querySelector("output")
-        if (out) out.textContent = { sensitivity: v => `${v.toFixed(2)}×`, fov: v => `${v}°`, musicVolume: v => `${Math.round(v * 100)}%`, sfxVolume: v => `${Math.round(v * 100)}%` }[key](settings[key])
+        if (out) out.textContent = { sensitivity: v => `${v.toFixed(2)}×`, fov: v => `${v}°`, musicVolume: v => `${Math.round(v * 100)}%`, sfxVolume: v => `${Math.round(v * 100)}%`, ambienceVolume: v => `${Math.round(v * 100)}%` }[key](settings[key])
       })
     hook("set-sens", "sensitivity")
     hook("set-fov", "fov")
     hook("set-music", "musicVolume")
     hook("set-sfx", "sfxVolume")
+    hook("set-amb", "ambienceVolume")
+    body.querySelector("#set-voice").addEventListener("change", e => updateSettings({ npcVoice: e.target.checked }))
     body.querySelector("#set-invert").addEventListener("change", e => updateSettings({ invertY: e.target.checked }))
     body.querySelector("#set-compass").addEventListener("change", e => updateSettings({ compass: e.target.checked }))
     bind(body, {
@@ -841,6 +849,7 @@ export class UI {
     this.dialogueNpc = npc
     this.openModal("dialogue")
     this.dlgLog = [{ who: npc.name, text: D.greeting(this.game, npc.spec) }]
+    this.game.audio.greet(npc.spec, npc.spec.race, this.dlgLog[0].text)
     this.dlgView = "talk"
     this.renderDialogue()
   }

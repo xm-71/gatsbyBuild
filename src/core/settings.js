@@ -23,6 +23,8 @@ const DEFAULTS = {
   fov: 72,
   musicVolume: 0.5,
   sfxVolume: 0.8,
+  ambienceVolume: 0.7,
+  npcVoice: false,
   compass: true,
   keys: Object.fromEntries(ACTIONS.map(([id, , key]) => [id, key])),
 }
