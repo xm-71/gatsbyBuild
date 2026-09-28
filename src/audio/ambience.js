@@ -153,6 +153,9 @@ export class Ambience {
       if (env.inTown && !env.night) every("hammer", 5, 14, () => this.distantHammer())
       if (env.region === "bitterCoast" && !env.night) every("frog", 3, 8, () => e.osc(bus, { type: "square", freq: 140, slide: -40, dur: 0.12, gain: 0.02 }))
     }
+    if (env.underwater) every("bubble", 0.6, 2.2, () => {
+      for (let i = 0; i < 3; i++) e.osc(bus, { freq: 500 + Math.random() * 700, slide: 400, dur: 0.06, gain: 0.03, t0: e.now + i * 0.08 })
+    })
     if (dung) {
       if (env.theme === "cave" || env.theme === "tomb" || env.theme === "citadel") every("drip", 1.2, 4.5, () => this.drip())
       if (env.theme === "dwemer") {

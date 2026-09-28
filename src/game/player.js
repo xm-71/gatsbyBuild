@@ -5,7 +5,7 @@ import { getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, fatigueRatio, mov
 import { hitChance, meleeDamage, spellChance, lockpickChance } from "../logic/combat.js"
 import { makeItemFromSpec } from "../logic/items.js"
 import { getSpell } from "../data/spells.js"
-import { BIRTHSIGNS } from "../data/stats.js"
+import { BIRTHSIGNS, RACES } from "../data/stats.js"
 import { Projectile, ELEMENT_COLOR } from "./actors.js"
 import { RNG } from "../core/rng.js"
 import { randomLoot } from "../logic/items.js"
@@ -125,17 +125,24 @@ export function updatePlayer(game, dt) {
 
   const ground = area.groundHeight(pc.pos.x, pc.pos.z)
   const wasOnGround = pc.onGround
+  const wasSwimming = pc.swimming
   pc.swimming = false
-  if (area.kind === "overworld" && ground < SEA_LEVEL - 1.25) {
-    // swim at the surface
-    if (pc.pos.y <= SEA_LEVEL - 1.25) {
-      pc.swimming = true
-      pc.pos.y = SEA_LEVEL - 1.25
-      pc.vel.y = Math.max(0, pc.vel.y)
-      pc.onGround = false
-      if (moving) game.exercise("athletics", 0.07 * dt * 10)
-    }
+  const surface = SEA_LEVEL - 1.25
+  if (area.kind === "overworld" && ground < surface && pc.pos.y <= surface) {
+    // Swim at the surface, or dive: look down and swim forward to go under,
+    // look up or hold jump to rise.
+    pc.swimming = true
+    if (!wasSwimming && pc.vel.y < -4) game.audio.play("splash")
+    const fwdHeld = inp.action("forward") || inp.down("ArrowUp")
+    let vy = pc.vel.y > 0 ? pc.vel.y : pc.vel.y * 0.3 // a dive from height carries you under
+    if (fwdHeld && Math.abs(pc.pitch) > 0.2) vy = Math.sin(pc.pitch) * speed * 0.9
+    if (inp.action("jump")) vy = 2.6
+    pc.pos.y = Math.max(ground + 0.3, Math.min(surface, pc.pos.y + vy * dt))
+    pc.vel.y = pc.vel.y > 0 && pc.pos.y >= surface ? pc.vel.y : 0
+    pc.onGround = false
+    if (moving) game.exercise("athletics", 0.07 * dt * 10)
   }
+  updateBreath(game, dt)
   if (!pc.swimming) {
     if (pc.pos.y <= ground) {
       if (!wasOnGround && pc.vel.y < -11) {
@@ -182,6 +189,34 @@ export function updatePlayer(game, dt) {
   pc.castCd -= dt
   if (inp.actionPressed("cast") || inp.wasPressed("Mouse2")) castSelected(game)
   updateInteraction(game)
+}
+
+// Holding your breath under water; Argonians breathe water.
+function updateBreath(game, dt) {
+  const c = game.char
+  const pc = game.pc
+  const max = 20 + getSkill(c, "athletics") / 5
+  const under = game.area.kind === "overworld" && pc.swimming && pc.pos.y + (pc.sneaking ? 1.15 : 1.62) < SEA_LEVEL - 0.05
+  pc.underwater = under
+  if (c.breath == null) c.breath = max
+  if (!under || RACES[c.race].waterBreathing) {
+    c.breath = Math.min(max, c.breath + dt * 6)
+    return
+  }
+  c.breath -= dt
+  if (c.breath <= 0) {
+    c.breath = 0
+    game.damagePlayer(4 * dt, { quiet: true })
+    pc.drownMsg = (pc.drownMsg || 0) - dt
+    if (pc.drownMsg <= 0) {
+      pc.drownMsg = 3
+      game.msg("You are drowning!", "#ff7a5a")
+    }
+  }
+}
+
+export function maxBreath(c) {
+  return 20 + getSkill(c, "athletics") / 5
 }
 
 export function currentWeapon(c) {

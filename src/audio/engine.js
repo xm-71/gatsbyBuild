@@ -21,7 +21,11 @@ export class AudioEngine {
       const comp = ctx.createDynamicsCompressor()
       comp.threshold.value = -14
       comp.ratio.value = 4
-      this.master.connect(comp).connect(ctx.destination)
+      // muffles everything when the listener is under water
+      this.muffle = ctx.createBiquadFilter()
+      this.muffle.type = "lowpass"
+      this.muffle.frequency.value = 20000
+      this.master.connect(this.muffle).connect(comp).connect(ctx.destination)
       this.sfxBus = ctx.createGain()
       this.musicBus = ctx.createGain()
       this.ambBus = ctx.createGain()

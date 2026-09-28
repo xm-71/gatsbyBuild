@@ -26,6 +26,8 @@ import { ARTIFACTS } from "../data/artifacts.js"
 import { showLoading, hideLoading } from "../ui/loading.js"
 import { Q } from "../core/quality.js"
 import { onSettingsChange } from "../core/settings.js"
+import { PostFX } from "../render/post.js"
+import { settings } from "../core/settings.js"
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
 
 const HOURS_PER_SECOND = 2 / 60 // one real second = two game minutes
@@ -50,6 +52,7 @@ export class Game {
     this.viewmodel = new ViewModel(this.camera)
     this.playerLight = new THREE.PointLight(0xffd8a0, 0, 16, 1.6)
     this.camera.add(this.playerLight)
+    this.post = new PostFX(this.renderer, { ...Q.post, samples: Q.antialias ? 4 : 0 })
     this.input = new Input(this.renderer.domElement)
     this.audio = new Audio()
     this.ui = new UI(this)
@@ -58,6 +61,7 @@ export class Game {
       this.camera.fov = s.fov
       this.camera.updateProjectionMatrix()
       this.audio.applyVolumes()
+      this.post.off = s.postfx === false
     })
     this.mode = "title"
     this.timer = new THREE.Timer()
@@ -82,6 +86,7 @@ export class Game {
     this.camera.aspect = window.innerWidth / window.innerHeight
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(window.innerWidth, window.innerHeight)
+    this.post.setSize()
   }
 
   // Generate (or reuse) a world for the given seed. The title screen flies over it.
@@ -108,6 +113,8 @@ export class Game {
     } catch {
       /* shaders compile on first draw instead */
     }
+    // warm up the post-processing targets and shaders behind the loading screen
+    this.post.render(this.overworld.scene, this.camera)
     this.loadingWorld = false
     onProgress(1, "")
   }
@@ -269,6 +276,7 @@ export class Game {
     const dt = Math.min(0.05, this.timer.getDelta())
     if (this.mode === "title" || this.mode === "chargen") this.updateTitle(dt)
     else if (this.mode === "play") {
+      if (this.ui.modal === "dialogue" && this.ui.dialogueNpc) this.updateTalkCamera(dt)
       if (!this.ui.modal && this.input.locked) this.update(dt)
       else if (!this.ui.modal && !this.input.locked) this.ui.showPauseHint(true)
       this.ui.updateHud()
@@ -279,11 +287,75 @@ export class Game {
       if (this.area.kind === "overworld") this.area.sky.update(dt, this.hourOfDay(), this.camera, this.area.fogColor(this.pc.pos.x, this.pc.pos.z), this.area.scene.fog)
       for (const e of this.area.enemies) e.update(dt)
     }
-    this.viewmodel.root.visible = this.mode === "play"
+    this.viewmodel.root.visible = this.mode === "play" && this.ui.modal !== "dialogue"
     this.audio.update(dt, this)
     if (this.input.locked) this.ui.showPauseHint(false)
     this.input.endFrame()
-    this.renderer.render(this.area.scene, this.camera)
+    this.updatePost(dt)
+    this.post.render(this.area.scene, this.camera)
+  }
+
+  // Conversation close-up: glide the camera to the speaker's face, framed on
+  // the left so the dialogue sits beside it; the speaker blinks and talks.
+  startTalkCamera(npc) {
+    this.talkCam = { t: 0, from: this.camera.position.clone(), fromQ: this.camera.quaternion.clone() }
+    npc.talkUntil = 0
+  }
+
+  updateTalkCamera(dt) {
+    const npc = this.ui.dialogueNpc
+    const tc = this.talkCam
+    const head = npc.rig?.head
+    npc.talking = performance.now() / 1000 < (npc.talkUntil || 0)
+    npc.update(dt, npc)
+    if (!tc || !head) return
+    tc.t = Math.min(1, tc.t + dt * 1.6)
+    const k = tc.t * tc.t * (3 - 2 * tc.t)
+    npc.mesh.updateMatrixWorld(true)
+    const face = head.localToWorld(new THREE.Vector3(0, 0.15, 0.02))
+    const fwd = new THREE.Vector3(Math.sin(npc.yaw), 0, Math.cos(npc.yaw))
+    const side = new THREE.Vector3(Math.cos(npc.yaw), 0, -Math.sin(npc.yaw))
+    const narrow = window.innerWidth < 760
+    const aspect = window.innerWidth / window.innerHeight
+    const pos = face.clone().addScaledVector(fwd, narrow ? 1.15 : 0.85).add(new THREE.Vector3(0, 0.02, 0))
+    // shift the aim so the face sits in the left third, clear of the dialogue
+    const look = narrow ? face.clone().add(new THREE.Vector3(0, -0.14, 0)) : face.clone().addScaledVector(side, 0.3 * Math.min(1.6, aspect / 1.5)).add(new THREE.Vector3(0, -0.04, 0))
+    const m = new THREE.Matrix4().lookAt(pos, look, new THREE.Vector3(0, 1, 0))
+    const q = new THREE.Quaternion().setFromRotationMatrix(m)
+    this.camera.position.lerpVectors(tc.from, pos, k)
+    this.camera.quaternion.slerpQuaternions(tc.fromQ, q, k)
+  }
+
+  // Feed the post-processing: ambient occlusion strength, where the sun is on
+  // screen and how strong its shafts are, and whether the camera is underwater.
+  updatePost(dt) {
+    const s = this.post.state
+    if (!s) return
+    s.time += dt
+    const cam = this.camera
+    const camPos = cam.getWorldPosition(new THREE.Vector3())
+    s.ao = this.area.kind === "dungeon" ? 1 : 0.85
+    s.bloom = this.area.kind === "dungeon" ? 0.2 : 0.35
+    s.under = this.area.kind === "overworld" && camPos.y < SEA_LEVEL - 0.05 ? 1 : 0
+    s.sunAmt = 0
+    if (this.area.kind !== "overworld" || s.under) return
+    const sky = this.area.sky
+    const dir = sky.skyUniforms.sunDir.value
+    const fwd = cam.getWorldDirection(new THREE.Vector3())
+    const facing = fwd.dot(dir)
+    if (dir.y < -0.05 || facing < 0.1) return
+    const p = camPos.clone().addScaledVector(dir, 1000).project(cam)
+    s.sun.set(p.x * 0.5 + 0.5, p.y * 0.5 + 0.5)
+    const w = this.mode === "title" ? "clear" : this.weather
+    const low = 1 - Math.min(1, dir.y / 0.45) // dawn and dusk
+    const storm = w === "ash" || w === "blight"
+    let amt = 0.18 + low * 0.45
+    if (storm) amt = 0.55
+    else if (w === "fog") amt = 0.4
+    else if (w === "rain" || w === "cloudy") amt *= 0.4
+    s.sunAmt = amt * Math.min(1, (facing - 0.1) / 0.4) * Math.min(1, (dir.y + 0.05) / 0.15)
+    s.sunColor.setRGB(1, 0.78 - low * 0.18, 0.55 - low * 0.25)
+    if (storm) s.sunColor.set(w === "blight" ? 0xd06040 : 0xc09060)
   }
 
   updateTitle(dt) {
@@ -313,10 +385,20 @@ export class Game {
       const { day } = this.area.sky.update(dt, this.hourOfDay(), this.camera, this.area.fogColor(this.pc.pos.x, this.pc.pos.z), this.area.scene.fog)
       this.daylight = day
       this.area.scene.background = this.area.sky.skyColor
+      if (this.pc.underwater) {
+        // murky teal water: short fog, darker with depth and at night
+        const f = this.area.scene.fog
+        const depth = Math.max(0, SEA_LEVEL - this.camera.position.y)
+        f.color.setRGB(0.06, 0.22, 0.26).multiplyScalar((0.35 + day * 0.65) * Math.max(0.4, 1 - depth / 25))
+        f.near = 0.5
+        f.far = 30
+        this.area.scene.background = f.color
+      }
       this.knownTownCheck()
     } else this.daylight = 0
 
     updatePlayer(this, dt)
+    this.audio.setUnderwater(!!this.pc.underwater && this.area.kind === "overworld")
     this.area.update(dt)
     for (const p of this.projectiles) p.update(dt)
     this.projectiles = this.projectiles.filter(p => !p.dead)
@@ -551,7 +633,7 @@ export class Game {
   }
 
   flash(pos, color, size = 1) {
-    const m = new THREE.Mesh(new THREE.SphereGeometry(0.5 * size, 10, 8), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, depthWrite: false }))
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.5 * size, 10, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.5), transparent: true, opacity: 0.8, depthWrite: false }))
     m.position.copy(pos)
     const l = new THREE.PointLight(color, 8, 12 * size, 2)
     m.add(l)

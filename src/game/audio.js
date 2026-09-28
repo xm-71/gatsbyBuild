@@ -73,6 +73,13 @@ export class Audio {
     if (settings.npcVoice) speakGreeting(text, raceId, npcSpec)
   }
 
+  setUnderwater(on) {
+    if (!this.e.ctx || on === this.under) return
+    this.under = on
+    this.e.muffle.frequency.setTargetAtTime(on ? 500 : 20000, this.e.now, 0.08)
+    if (on) this.play("splash")
+  }
+
   enterArea(area) {
     if (!this.e.ctx) return
     this.e.setSpace(area.kind === "dungeon" ? "dungeon" : "overworld")
@@ -97,7 +104,7 @@ export class Audio {
     const w = g.world
     const area = g.area
     const p = title ? g.camera.position : g.pc.pos
-    const env = { kind: area.kind, title, weather: title ? "clear" : g.weather, night: !title && g.isNight?.(), region: w.regionAt(p.x, p.z), inTown: false, coast: 0, lava: false, theme: area.dungeon?.type || "cave" }
+    const env = { underwater: !!g.pc?.underwater && !title, kind: area.kind, title, weather: title ? "clear" : g.weather, night: !title && g.isNight?.(), region: w.regionAt(p.x, p.z), inTown: false, coast: 0, lava: false, theme: area.dungeon?.type || "cave" }
     if (area.kind === "overworld") {
       env.inTown = !!area.townAt?.(p.x, p.z, 10)
       let water = 0

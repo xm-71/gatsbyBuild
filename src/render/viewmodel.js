@@ -180,7 +180,7 @@ export class ViewModel {
 
   cast(color) {
     this.castT = 1
-    this.spellGlow.material.color.set(color)
+    this.spellGlow.material.color.set(color).multiplyScalar(3)
     this.spellLight.color.set(color)
   }
 }

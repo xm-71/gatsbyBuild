@@ -9,9 +9,9 @@ function metalMat(material, color) {
   if (cache.has(key)) return cache.get(key)
   const t = texture("plate")
   const opts = { color, map: t.map, normalMap: t.normalMap, metalness: 0.8, roughness: 0.35, side: THREE.DoubleSide }
-  if (material === "glass") Object.assign(opts, { metalness: 0.1, roughness: 0.1, transparent: true, opacity: 0.85, emissive: 0x1a5a30, emissiveIntensity: 0.6 })
+  if (material === "glass") Object.assign(opts, { metalness: 0.1, roughness: 0.1, transparent: true, opacity: 0.85, emissive: 0x2a8a50, emissiveIntensity: 0.9 })
   if (material === "ebony") Object.assign(opts, { metalness: 0.5, roughness: 0.2 })
-  if (material === "daedric") Object.assign(opts, { emissive: 0x5a0808, emissiveIntensity: 0.5, roughness: 0.5 })
+  if (material === "daedric") Object.assign(opts, { emissive: 0x9a1010, emissiveIntensity: 1.3, roughness: 0.5 })
   if (material === "chitin" || material === "bonemold" || material === "netch leather") Object.assign(opts, { metalness: 0.05, roughness: 0.6 })
   if (material === "dwemer") Object.assign(opts, { map: texture("dwemerMetal").map, normalMap: texture("dwemerMetal").normalMap, color: 0xffffff })
   const m = new THREE.MeshStandardMaterial(opts)

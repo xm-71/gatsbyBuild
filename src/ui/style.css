@@ -207,3 +207,11 @@ p.small { font-size: 13px; margin: 2px 0; }
 .coating { color: #9ae070; margin-top: 6px; }
 .repairlist { display: flex; flex-direction: column; gap: 4px; width: 100%; }
 .repairlist button { text-align: left; }
+
+.breath { position: absolute; left: 50%; top: 104px; transform: translateX(-50%); width: 180px; height: 7px; border: 1px solid #6a8a90; background: rgba(0,0,0,0.5); }
+.breath .fill { height: 100%; background: linear-gradient(#9ad8e8, #4a98b0); }
+
+/* close-up conversation: the speaker's face on the left, the talk on the right */
+.modal-layer.talking { background: linear-gradient(90deg, rgba(0,0,0,0) 30%, rgba(0,0,0,0.45) 60%); place-items: center end; padding-right: 2vw; }
+.modal-layer.talking .dialogue { width: min(560px, 54vw); }
+@media (max-width: 760px) { .modal-layer.talking { place-items: end center; padding: 0 0 2vh; background: rgba(0,0,0,0.2); } .modal-layer.talking .dialogue { width: 96vw; height: 58vh; } }

@@ -20,7 +20,7 @@ function mats() {
   return { MAT, GHOST }
 }
 function eyeMat(color) {
-  if (!EYE_MATS.has(color)) EYE_MATS.set(color, new THREE.MeshBasicMaterial({ color }))
+  if (!EYE_MATS.has(color)) EYE_MATS.set(color, new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.5) }))
   return EYE_MATS.get(color)
 }
 
@@ -62,6 +62,13 @@ const limbGeo = (len, r0, r1, s = 8) => {
   g.translate(0, -len / 2, 0)
   return g
 }
+
+const FACE_MATS = new Map()
+function faceMat(color) {
+  if (!FACE_MATS.has(color)) FACE_MATS.set(color, new THREE.MeshLambertMaterial({ color }))
+  return FACE_MATS.get(color)
+}
+const hcol = o => o.hair
 
 function pivot(parent, x, y, z) {
   const p = new THREE.Group()
@@ -150,7 +157,9 @@ function humanoid(o) {
   H.add(cyl(0.045, 0.05, 0.1), skinTile, o.skin, { pos: [0, 0.03, 0] })
   const headY = 0.14 * hs
   const faceTile = o.race === "argonian" ? "scales" : o.race === "khajiit" ? "fur" : o.skull ? "bone" : "face"
-  H.add(sphere(0.1, 14, 12), faceTile, o.skin, { pos: [0, headY, 0], scale: [0.95 * hs, 1.12 * hs, 1.02 * hs] })
+  // face shape: nose, jaw, brow, chin and markings vary from person to person
+  const F = { nose: 1, jaw: 1, brow: 1, chin: 1, ...(o.face || {}) }
+  H.add(sphere(0.1, 14, 12), faceTile, o.skin, { pos: [0, headY, 0], scale: [0.95 * hs * F.jaw, 1.12 * hs, 1.02 * hs] })
   const eyeY = headY + 0.018 * hs
   const eyeZ = 0.088 * hs
   const eyeCol = o.eye ?? 0x1a1208
@@ -162,7 +171,14 @@ function humanoid(o) {
     H.add(sphere(0.012, 6, 4), "skin", 0x2a1a1a, { pos: [0, headY - 0.02, 0.13] })
     for (const sx of [-1, 1]) H.add(new THREE.ConeGeometry(0.035, 0.08, 4), "fur", o.skin, { pos: [sx * 0.06, headY + 0.1, -0.01], rot: [0, 0, -sx * 0.25] })
   } else if (!o.skull) {
-    H.add(new THREE.ConeGeometry(0.018, 0.05, 5), faceTile, shade(o.skin, 0.95), { pos: [0, headY - 0.005, 0.1 * hs], rot: [Math.PI / 2 - 0.3, 0, 0] })
+    H.add(new THREE.ConeGeometry(0.018, 0.05, 5), faceTile, shade(o.skin, 0.95), { pos: [0, headY - 0.005, 0.1 * hs], rot: [Math.PI / 2 - 0.3, 0, 0], scale: [F.nose, F.nose * (F.noseLong || 1), F.nose] })
+    // chin and cheekbones
+    H.add(sphere(0.032, 8, 6), faceTile, o.skin, { pos: [0, headY - 0.085 * hs, 0.06 * hs], scale: [1.3 * F.chin * F.jaw, 0.8, 0.9] })
+    if (F.cheeks) for (const sx of [-1, 1]) H.add(sphere(0.025, 6, 5), faceTile, o.skin, { pos: [sx * 0.05 * hs, headY - 0.01, 0.07 * hs], scale: [1, 0.7, 0.8] })
+    // war paint and tattoos (Dunmer and Ashlanders especially), and scars
+    if (F.tattoo) for (const sx of [-1, 1]) for (let k = 0; k < 2; k++) H.add(new THREE.BoxGeometry(0.006, 0.05, 0.004), "plain", F.tattoo, { pos: [sx * (0.03 + k * 0.014) * hs, headY - 0.028, 0.089 * hs - k * 0.004], rot: [0, 0, sx * 0.15] })
+    if (F.scar) H.add(new THREE.BoxGeometry(0.005, 0.06, 0.004), "plain", shade(o.skin, 0.6), { pos: [F.scar * 0.034 * hs, eyeY + 0.005, 0.092 * hs], rot: [0, 0, F.scar * 0.35] })
+    if (F.mustache && hcol(o) !== undefined) H.add(new THREE.BoxGeometry(0.06, 0.012, 0.012), "hair", hcol(o), { pos: [0, headY - 0.042 * hs, 0.093 * hs], scale: [1, 1, 1] })
     if (o.elf) for (const sx of [-1, 1]) H.add(new THREE.ConeGeometry(0.018, 0.1, 4), "skin", o.skin, { pos: [sx * 0.095 * hs, headY + 0.03, -0.01], rot: [0, 0, -sx * 1.1] })
     else for (const sx of [-1, 1]) H.add(sphere(0.022, 6, 5), "skin", o.skin, { pos: [sx * 0.093 * hs, headY, -0.005], scale: [0.5, 1, 0.8] })
     if (o.race === "orc") {
@@ -170,7 +186,7 @@ function humanoid(o) {
       H.add(new THREE.BoxGeometry(0.15, 0.022, 0.03), "skin", shade(o.skin, 0.8), { pos: [0, eyeY + 0.03, 0.078] })
     }
     // brows
-    if (o.hair !== undefined) for (const sx of [-1, 1]) H.add(new THREE.BoxGeometry(0.035, 0.008, 0.01), "hair", o.hair, { pos: [sx * 0.035, eyeY + 0.025, eyeZ + 0.005], rot: [0, 0, sx * 0.15] })
+    if (o.hair !== undefined) for (const sx of [-1, 1]) H.add(new THREE.BoxGeometry(0.035, 0.008 * F.brow, 0.01 * F.brow), "hair", o.hair, { pos: [sx * 0.035, eyeY + 0.025, eyeZ + 0.005], rot: [0, 0, sx * (0.15 + (F.browTilt || 0))] })
   }
   if (o.tentacles) for (let i = 0; i < 6; i++) H.add(taperTube([V3((i - 2.5) * 0.02, headY - 0.05, 0.08), V3((i - 2.5) * 0.03, headY - 0.15, 0.12), V3((i - 2.5) * 0.02, headY - 0.26, 0.1)], 0.014, 0.004, 4, 5), "flesh", shade(o.skin, 0.8))
   if (o.mask) {
@@ -203,6 +219,25 @@ function humanoid(o) {
   }
   const head = pivot(neck, 0, 0, 0)
   H.into(head)
+  // eyelids that blink and a mouth that moves when they talk
+  const face = {}
+  if (!o.skull && !o.glowEyes && !o.mask && !ghost) {
+    const lidMat = faceMat(o.skin)
+    face.lids = [-1, 1].map(sx => {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(0.0165, 8, 6), lidMat)
+      m.position.set(sx * 0.034 * hs, eyeY + 0.002, eyeZ - 0.001)
+      m.scale.set(1.25, 0.05, 0.75)
+      head.add(m)
+      return m
+    })
+    if (o.race !== "argonian" && o.race !== "khajiit") {
+      const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.007, 0.01), faceMat(0x3a1814))
+      mouth.position.set(0, headY - 0.056 * hs, 0.093 * hs)
+      head.add(mouth)
+      face.mouth = mouth
+      face.mouthY = mouth.position.y
+    }
+  }
 
   // ---- arms ----
   const arms = []
@@ -286,27 +321,114 @@ function humanoid(o) {
   return {
     root,
     head,
-    anim(t, move, attack) {
+    rig: { hips, torso, head, arms, legs, face },
+    // x (all optional): variant 0 overhead / 1 sweep / 2 thrust, flinch 0..1,
+    // dying 0..1 (knees buckle), ik [left, right] foot lift in metres,
+    // look (head yaw toward someone), seed (desynchronises idle fidgets)
+    anim(t, move, attack, x = {}) {
       const w = t * 8
+      const dying = x.dying || 0
+      const flinch = x.flinch || 0
       for (const L of legs) {
         const s = Math.sin(w + L.phase)
         L.hp.rotation.x = -s * 0.55 * move
         L.kn.rotation.x = Math.max(0, Math.cos(w + L.phase)) * 0.9 * move + 0.05
       }
+      // feet meet the ground: bend the uphill leg (two equal segments)
+      if (x.ik && legs.length === 2) {
+        legs.forEach((L, i) => {
+          const lift = Math.min(0.5, x.ik[i] || 0)
+          if (lift < 0.01) return
+          const th = Math.acos(Math.max(0.3, 1 - lift / 0.88))
+          L.hp.rotation.x -= th
+          L.kn.rotation.x += th * 2
+        })
+      }
       if (legs.tail) legs.tail.rotation.y = Math.sin(t * 2) * 0.3
       const [left, right] = arms
       left.sh.rotation.x = Math.sin(w) * 0.5 * move
       left.el.rotation.x = -0.25 - Math.max(0, Math.sin(w)) * 0.3 * move
-      right.sh.rotation.x = -Math.sin(w) * 0.5 * move - attack * 2.2
-      right.sh.rotation.z = attack * 0.4
-      right.el.rotation.x = -0.25 - attack * 0.6
       left.sh.rotation.z = -0.08
-      right.sh.rotation.z += 0.08
-      hips.position.y = baseY + (o.float ? Math.sin(t * 2) * 0.1 : Math.abs(Math.sin(w)) * 0.035 * move)
-      torso.rotation.x = hunch + attack * 0.25
+      right.el.rotation.x = -0.25 - attack * 0.6
       torso.rotation.y = Math.sin(w) * 0.08 * move
+      const v = x.variant || 0
+      if (v === 1) {
+        // side sweep: arm out wide, torso winds up and uncoils
+        right.sh.rotation.x = -Math.sin(w) * 0.5 * move - attack * 1.2
+        right.sh.rotation.z = 0.08 + attack * 1.3
+        torso.rotation.y += -attack * 0.55
+      } else if (v === 2) {
+        // thrust: arm drawn back level, then driven forward
+        right.sh.rotation.x = -Math.sin(w) * 0.5 * move - attack * 1.45
+        right.sh.rotation.z = 0.08 + attack * 0.15
+        right.el.rotation.x = -0.25 - attack * 1.4
+        torso.rotation.y += attack * 0.35
+      } else {
+        right.sh.rotation.x = -Math.sin(w) * 0.5 * move - attack * 2.2
+        right.sh.rotation.z = 0.08 + attack * 0.4
+      }
+      hips.position.y = baseY + (o.float ? Math.sin(t * 2) * 0.1 : Math.abs(Math.sin(w)) * 0.035 * move)
+      hips.rotation.z = 0
+      torso.rotation.x = hunch + attack * 0.25 - flinch * 0.35
       torso.scale.y = 1 + Math.sin(t * 1.6) * 0.008
-      head.rotation.y = move < 0.1 ? Math.sin(t * 0.37) * 0.4 : 0
+      head.rotation.x = -flinch * 0.3
+      // idle life: glances, weight shifts and the odd gesture
+      const idle = move < 0.1 && attack < 0.05 && !dying && x.talk == null ? 1 : 0
+      if (x.look != null) head.rotation.y = Math.max(-0.9, Math.min(0.9, x.look))
+      else head.rotation.y = idle ? Math.sin(t * 0.37) * 0.4 + Math.sin(t * 1.3) * 0.05 : 0
+      if (idle) {
+        hips.rotation.z = Math.sin(t * 0.45) * 0.035
+        torso.rotation.z = -Math.sin(t * 0.45) * 0.025
+        const cyc = (t + (x.seed || 0)) % 13
+        if (cyc < 1.8) {
+          const g = Math.sin((cyc / 1.8) * Math.PI)
+          if (Math.floor((t + (x.seed || 0)) / 13) % 2) {
+            // scratch the head
+            left.sh.rotation.x = -2.3 * g
+            left.sh.rotation.z = -0.08 - 0.5 * g
+            left.el.rotation.x = -0.25 - 1.5 * g
+          } else {
+            // hand on hip
+            left.sh.rotation.z = -0.08 - 0.55 * g
+            left.el.rotation.x = -0.25 - 1.1 * g
+          }
+        }
+      }
+      // blink every few seconds; talk with a moving jaw
+      if (face.lids) {
+        const bc = (t * 0.93 + (x.seed || 0) * 1.7) % 4.3
+        const shut = dying >= 1 ? 1 : bc < 0.12 ? Math.sin((bc / 0.12) * Math.PI) : 0
+        for (const l of face.lids) l.scale.y = 0.05 + shut * 0.85
+      }
+      if (x.talk) {
+        // talk with the hands a little
+        const g = Math.max(0, Math.sin(t * 2.3)) * 0.5
+        right.sh.rotation.x = -0.3 - g * 0.5
+        right.el.rotation.x = -0.6 - g * 0.6
+      }
+      if (face.mouth) {
+        const open = x.talk ? Math.max(0, Math.abs(Math.sin(t * 11) + Math.sin(t * 7.3) * 0.6) - 0.2) : 0
+        face.mouth.scale.y = 1 + open * 3.2
+        face.mouth.position.y = face.mouthY - open * 0.008
+      }
+      if (flinch > 0) {
+        left.sh.rotation.x -= flinch * 0.5
+        right.sh.rotation.x -= flinch * 0.3
+      }
+      if (dying > 0) {
+        // knees buckle, hips drop, body slumps and arms go limp
+        for (const L of legs) {
+          L.hp.rotation.x = -dying * 0.9
+          L.kn.rotation.x = dying * 1.5
+        }
+        hips.position.y = baseY - dying * 0.32
+        torso.rotation.x = hunch + dying * 0.45
+        head.rotation.x = dying * 0.5
+        for (const a of arms) {
+          a.sh.rotation.x = dying * 0.35
+          a.el.rotation.x = -0.1
+        }
+      }
     },
   }
 }
@@ -767,7 +889,7 @@ export function buildCreatureMesh(def) {
   const holder = new THREE.Group()
   holder.add(built.root)
   holder.scale.setScalar(def.scale || 1)
-  return { group: holder, anim: built.anim, head: built.head }
+  return { group: holder, anim: built.anim, head: built.head, rig: built.rig }
 }
 
 // ---------------------------------------------------------------------------
@@ -808,7 +930,19 @@ export function buildNpcMesh(npc, race, factionColor) {
     skin: race.skin,
     hair: race.hair,
     hairStyle: styles[Math.floor(rnd() * styles.length)],
-    beard: !female && raceKey === "nord" && rnd() < 0.7,
+    beard: !female && (raceKey === "nord" ? rnd() < 0.7 : ["imperial", "breton", "redguard", "orc", "dunmer"].includes(raceKey) && rnd() < 0.2),
+    face: {
+      nose: 0.75 + rnd() * 0.6,
+      noseLong: 0.85 + rnd() * 0.4,
+      jaw: (female ? 0.92 : 1) + (rnd() - 0.5) * 0.14 + (raceKey === "orc" || raceKey === "nord" ? 0.06 : 0),
+      chin: 0.8 + rnd() * 0.45,
+      brow: 0.7 + rnd() * 0.9,
+      browTilt: (rnd() - 0.5) * 0.35,
+      cheeks: rnd() < 0.4,
+      tattoo: (raceKey === "dunmer" && rnd() < 0.35) || npc.role === "ashlander" ? (rnd() < 0.5 ? 0x2a1a3a : 0x8a1a10) : 0,
+      scar: rnd() < 0.12 ? (rnd() < 0.5 ? -1 : 1) : 0,
+      mustache: !female && !["argonian", "khajiit", "altmer", "bosmer"].includes(raceKey) && rnd() < 0.18,
+    },
     eye: EYE[raceKey],
     cloth,
     cloth2: shade(cloth, 0.8),
@@ -832,7 +966,7 @@ export function buildNpcMesh(npc, race, factionColor) {
   holder.add(built.root)
   if (raceKey === "altmer") holder.scale.setScalar(1.06)
   if (raceKey === "bosmer") holder.scale.setScalar(0.92)
-  return { group: holder, anim: built.anim, head: built.head }
+  return { group: holder, anim: built.anim, head: built.head, rig: built.rig }
 }
 
 // Distance level of detail: bake a character's current pose into one merged

@@ -15,7 +15,7 @@ import { questTargets, nearbyPlaces } from "../game/markers.js"
 import { CELL as DCELL } from "../logic/dungeongen.js"
 import { PRESETS, qualityName, setQuality } from "../core/quality.js"
 import * as D from "../game/dialogue.js"
-import { usePotion, eatItem, doRest, coatWeapon, useRepairTool } from "../game/player.js"
+import { usePotion, eatItem, doRest, coatWeapon, useRepairTool, maxBreath } from "../game/player.js"
 
 // A thin condition bar under worn weapons and armour.
 function condBar(i) {
@@ -273,6 +273,7 @@ export class UI {
       <div class="equip"><div class="slot weapon"></div><div class="slot spell"></div><div class="slot effects"></div></div>
       <div class="mapbox"><div class="status"></div><canvas width="170" height="170"></canvas><div class="compass">N</div></div>
       <div class="sneak hidden">◉ Sneaking</div>
+      <div class="breath hidden"><div class="fill"></div></div>
       <div class="quickbar"></div>
       <div class="compassbar"><div class="cb-track"></div></div>`
     this.h = {
@@ -283,6 +284,7 @@ export class UI {
       msgs: this.hud.querySelector(".msgs"),
       fills: this.hud.querySelectorAll(".bars .fill"),
       bars: this.hud.querySelector(".bars"),
+      breath: this.hud.querySelector(".breath"),
       weapon: this.hud.querySelector(".slot.weapon"),
       spell: this.hud.querySelector(".slot.spell"),
       effects: this.hud.querySelector(".slot.effects"),
@@ -334,6 +336,9 @@ export class UI {
     } else this.h.target.classList.add("hidden")
     this.h.vignette.style.opacity = g.pc.hurtFlash
     this.h.sneak.classList.toggle("hidden", !g.pc.sneaking)
+    const showBreath = g.pc.underwater || (c.breath != null && c.breath < maxBreath(c) - 0.5 && g.area.kind === "overworld")
+    this.h.breath.classList.toggle("hidden", !showBreath || RACES[c.race].waterBreathing)
+    if (showBreath) this.h.breath.firstChild.style.width = pct(c.breath, maxBreath(c))
     const hour = g.hourOfDay()
     const hh = String(Math.floor(hour)).padStart(2, "0")
     const mm = String(Math.floor((hour % 1) * 60)).padStart(2, "0")
@@ -610,8 +615,15 @@ export class UI {
     this.pause.classList.add("hidden")
   }
 
+  // The speaker's lips move for about as long as the line takes to say.
+  speak(text) {
+    const npc = this.dialogueNpc
+    if (npc) npc.talkUntil = performance.now() / 1000 + Math.min(6, 0.6 + String(text).length * 0.045)
+  }
+
   closeModal(silent = false) {
     if (this.modal) this.game.audio.play("close", { ui: true })
+    this.win.classList.remove("talking")
     this.modal = null
     this.dialogueNpc = null
     this.takeAll = null
@@ -820,6 +832,7 @@ export class UI {
         <label class="set-row" for="set-compass"><span>Show compass with quest markers</span><input type="checkbox" id="set-compass" ${s.compass ? "checked" : ""}></label>
       </section>
       <section><h3>Graphics</h3>
+        <label class="set-row" for="set-post"><span>Glow, light shafts and soft shadows</span><input type="checkbox" id="set-post" ${s.postfx !== false ? "checked" : ""} ${qualityName === "low" ? "disabled" : ""}></label>
         <div class="row wrap">${Object.entries(PRESETS).map(([k, p]) => `<button class="${k === qualityName ? "sel" : ""}" data-act="quality" data-arg="${k}">${p.name}</button>`).join("")}</div>
         <p class="dim small">Changing quality reloads the game${inRun ? ". Your run is saved and you can continue it from the title screen" : ""}.</p>
       </section>
@@ -843,6 +856,7 @@ export class UI {
     body.querySelector("#set-voice").addEventListener("change", e => updateSettings({ npcVoice: e.target.checked }))
     body.querySelector("#set-invert").addEventListener("change", e => updateSettings({ invertY: e.target.checked }))
     body.querySelector("#set-compass").addEventListener("change", e => updateSettings({ compass: e.target.checked }))
+    body.querySelector("#set-post").addEventListener("change", e => updateSettings({ postfx: e.target.checked }))
     bind(body, {
       bind: id => {
         this.captureKey = id
@@ -874,6 +888,9 @@ export class UI {
     this.dialogueNpc = npc
     this.openModal("dialogue")
     this.dlgLog = [{ who: npc.name, text: D.greeting(this.game, npc.spec) }]
+    this.win.classList.add("talking")
+    this.game.startTalkCamera?.(npc)
+    this.speak(this.dlgLog[0].text)
     this.game.audio.greet(npc.spec, npc.spec.race, this.dlgLog[0].text)
     this.dlgView = "talk"
     this.renderDialogue()
@@ -905,6 +922,7 @@ export class UI {
         const t = topics.find(x => x.id === id)
         this.dlgLog.push({ who: "You", text: t.label, me: true })
         this.dlgLog.push({ who: spec.name, text: D.handleTopic(g, spec, id) })
+        this.speak(this.dlgLog[this.dlgLog.length - 1].text)
         this.dlgView = "talk"
         this.renderDialogue()
       },
@@ -921,7 +939,10 @@ export class UI {
     const c = g.char
     const npc = this.dialogueNpc.spec
     const say = text => {
-      if (text) this.dlgLog.push({ who: npc.name, text })
+      if (text) {
+        this.dlgLog.push({ who: npc.name, text })
+        this.speak(text)
+      }
       this.dlgView = "talk"
       this.renderDialogue()
     }

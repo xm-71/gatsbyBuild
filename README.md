@@ -40,6 +40,10 @@ Pick **Low / Medium / High** in Settings. Your choice is remembered, and changin
 - **Characters:** knee and elbow joints, race features (pointed elf ears, Khajiit muzzles and tails, Argonian snouts and frills, Orc tusks), hair styles, clothing layers, bonemold guard armour and held weapons.
 - **Creatures:** each has its own anatomy, from cliff racers with sails and membrane wings to Dwemer spheres and centurions.
 - **Weapons and shields:** extruded blade profiles and material finishes, including glowing glass and red-runed daedric.
+- **Post-processing:** bloom makes lava, lanterns, windows, spells, glowing eyes and Daedric and glass blades glow. Ambient occlusion computed from the depth buffer darkens corners and the bases of walls. Light shafts break through trees and buildings at dawn and dusk and through ash storms. On Medium you get bloom and light shafts; High adds ambient occlusion; Low turns them off. Settings has a toggle for all three.
+- **Water:** the sea knows its depth, so shallows turn turquoise and clear, and foam rolls in along every shore. Caustic light dances on the sea floor. You can dive (look down and swim forward; jump or look up to rise) into a murky teal view with muffled sound and a breath meter. Argonians breathe water; everyone else starts drowning after 20–40 seconds.
+- **Animation:** people and creatures blink, glance around, shift their weight and fidget. Their feet meet slopes (the uphill leg bends), and four-legged creatures pitch and roll with the ground. Humanoids vary their attacks between overhead, sweeping and thrusting blows, flinch when hit, and collapse when they die: their knees buckle, then they topple and settle.
+- **Faces:** townsfolk get varied noses, jaws, chins, brows and cheekbones, plus war paint, scars, mustaches and beards. Talking to someone moves the camera into a close-up of their face, and their mouth and hands move as they speak.
 - **Dungeons:** sculpted cave rock with stalactites; built dungeons have trims, corner pillars, ceiling beams, pipes or ribs, and hanging lanterns. Props, chests and doorways are all textured.
 
 | | Low | Medium | High |
@@ -48,6 +52,8 @@ Pick **Low / Medium / High** in Settings. Your choice is remembered, and changin
 | Terrain grid | 256² | 512² | 768² |
 | Shadows | off | 2048 | 4096 |
 | Grass carpet | off | yes | dense |
+| Bloom and light shafts | off | yes | yes |
+| Ambient occlusion | off | off | yes |
 
 The world is generated in a background worker, and the island is built step by step behind a progress bar. Distant trees and parasols switch to simpler models, and far-off characters and creatures switch to a single merged model. This cuts the triangle count by about two thirds with no visible change.
 

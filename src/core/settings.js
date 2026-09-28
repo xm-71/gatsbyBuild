@@ -26,6 +26,7 @@ const DEFAULTS = {
   ambienceVolume: 0.7,
   npcVoice: false,
   compass: true,
+  postfx: true,
   keys: Object.fromEntries(ACTIONS.map(([id, , key]) => [id, key])),
 }
 

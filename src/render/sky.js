@@ -57,7 +57,7 @@ export class Sky {
     const moonMat = (color, op = 1) => new THREE.MeshBasicMaterial({ color, map: cardTexture("moon"), fog: false, transparent: op < 1, opacity: op })
     this.masser = new THREE.Mesh(new THREE.SphereGeometry(28, 16, 12), moonMat(0xd8806a))
     this.secunda = new THREE.Mesh(new THREE.SphereGeometry(12, 12, 10), moonMat(0xe0e0e8))
-    this.sunDisc = new THREE.Mesh(new THREE.SphereGeometry(16, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff8e0, fog: false }))
+    this.sunDisc = new THREE.Mesh(new THREE.SphereGeometry(16, 16, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xfff8e0).multiplyScalar(6), fog: false }))
     this.dome.add(this.masser, this.secunda, this.sunDisc)
 
     const starGeo = new THREE.BufferGeometry()

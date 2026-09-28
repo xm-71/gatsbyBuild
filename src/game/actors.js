@@ -67,6 +67,11 @@ export class Enemy {
 
     const built = buildCreatureMesh(base)
     this.mesh = built.group
+    this.mesh.rotation.order = "YXZ" // lean and tip in the creature's own frame
+    this.rig = built.rig || null
+    this.seed = Math.random() * 13
+    this.variant = 0
+    this.fallDir = -1
     if (this.boss) this.mesh.scale.multiplyScalar(1.25)
     this.anim = built.anim
     this.lodSwitch = new LodSwitch(this.mesh.children[0] ? this.mesh : this.mesh, built.anim, 35)
@@ -124,6 +129,8 @@ export class Enemy {
   }
 
   die() {
+    // fall away from the player, now and then toward them
+    this.fallDir = Math.random() < 0.7 ? -1 : 1
     this.dead = true
     this.hp = 0
     this.deathT = 0
@@ -145,8 +152,7 @@ export class Enemy {
     this.t += dt
     if (this.dead) {
       this.deathT += dt
-      const k = Math.min(1, this.deathT * 2.5)
-      this.mesh.rotation.z = k * (Math.PI / 2) * (this.def.flying ? 1 : 0.95)
+      this.updateDeath()
       if (this.def.flying || this.def.floating) this.mesh.position.y = Math.max(this.area.groundHeight(this.pos.x, this.pos.z) + 0.3, this.mesh.position.y - dt * 8)
       if (this.def.body === "ghost") this.mesh.visible = this.deathT < 1.2
       return
@@ -236,6 +242,7 @@ export class Enemy {
       }
       if (dist <= reach + 0.45 && this.cooldown <= 0 && this.windup <= 0 && Math.abs(dy) < 2.6 + (this.def.flying ? 2 : 0)) {
         // heavier creatures telegraph longer: step back out of reach to dodge
+        this.variant = Math.floor(Math.random() * 3)
         this.windupTotal = this.windup = 0.42 + Math.min(0.35, ((this.def.scale || 1) - 1) * 0.4) + (this.boss ? 0.12 : 0)
         this.attackAnim = 0
         this.cooldown = 1.25 / this.def.rate
@@ -294,8 +301,75 @@ export class Enemy {
       this.pos.y = this.area.kind === "overworld" ? Math.max(ground, -1.0) : ground
     }
     this.mesh.position.copy(this.pos)
-    this.mesh.rotation.y = this.yaw
-    if (this.lodSwitch.update(dist)) this.anim(this.t, speed > 0 ? Math.min(1, speed / 3) : 0, this.attackAnim)
+    // creatures swing to one side or the other when they attack
+    this.mesh.rotation.y = this.yaw + (this.rig ? 0 : (this.variant - 1) * 0.3 * this.attackAnim)
+    const flinch = Math.max(0, this.hurtT) / 0.2
+    if (this.lodSwitch.update(dist)) {
+      if (this.rig) {
+        const ik = this.footIK()
+        this.anim(this.t, speed > 0 ? Math.min(1, speed / 3) : 0, this.attackAnim, { variant: this.variant, flinch, ik, seed: this.seed })
+      } else {
+        this.anim(this.t, speed > 0 ? Math.min(1, speed / 3) : 0, this.attackAnim)
+        this.alignToSlope(dt, flinch)
+      }
+    }
+  }
+
+  // Two-legged: the root sits on the lower foot and the uphill leg bends.
+  footIK() {
+    if (this.def.flying || this.def.floating || this.area.kind === "dungeon") return null
+    const s = (this.def.scale || 1) * (this.boss ? 1.25 : 1)
+    const rx = Math.cos(this.yaw) * 0.09 * s
+    const rz = -Math.sin(this.yaw) * 0.09 * s
+    const gL = this.area.groundHeight(this.pos.x - rx, this.pos.z - rz)
+    const gR = this.area.groundHeight(this.pos.x + rx, this.pos.z + rz)
+    const low = Math.min(gL, gR)
+    if (low < this.pos.y) {
+      this.pos.y = low
+      this.mesh.position.y = low
+    }
+    return [(gL - low) / s, (gR - low) / s]
+  }
+
+  // Four legs and more: pitch and roll the body to lie along the ground.
+  alignToSlope(dt, flinch) {
+    let pitch = 0
+    let roll = 0
+    if (!this.def.flying && !this.def.floating && this.area.kind === "overworld") {
+      const r = this.radius * 1.2
+      const fx = Math.sin(this.yaw) * r
+      const fz = Math.cos(this.yaw) * r
+      const hF = this.area.groundHeight(this.pos.x + fx, this.pos.z + fz)
+      const hB = this.area.groundHeight(this.pos.x - fx, this.pos.z - fz)
+      const hR = this.area.groundHeight(this.pos.x + fz, this.pos.z - fx)
+      const hL = this.area.groundHeight(this.pos.x - fz, this.pos.z + fx)
+      pitch = Math.max(-0.6, Math.min(0.6, Math.atan2(hB - hF, 2 * r)))
+      roll = Math.max(-0.5, Math.min(0.5, Math.atan2(hR - hL, 2 * r)))
+    }
+    const k = Math.min(1, dt * 8)
+    this.slopeP = (this.slopeP || 0) + (pitch - (this.slopeP || 0)) * k
+    this.slopeR = (this.slopeR || 0) + (roll - (this.slopeR || 0)) * k
+    this.mesh.rotation.x = this.slopeP - flinch * 0.18
+    this.mesh.rotation.z = this.slopeR
+  }
+
+  // Collapse: knees buckle, then the body tips over under gravity and settles.
+  updateDeath() {
+    const t = this.deathT
+    const crumple = Math.min(1, t / 0.35)
+    const ft = Math.max(0, t - (this.rig ? 0.22 : 0.05))
+    const target = (Math.PI / 2) * (this.rig ? 0.92 : 1)
+    let ang = Math.min(target, 0.5 * 26 * ft * ft)
+    const land = Math.sqrt((2 * target) / 26)
+    if (ft > land) ang = target - 0.09 * Math.exp(-(ft - land) * 7) * Math.abs(Math.sin((ft - land) * 16))
+    if (this.rig) {
+      this.anim(this.t, 0, 0, { dying: crumple })
+      this.mesh.rotation.x = this.fallDir * ang
+    } else {
+      this.anim(this.t, 0, 0)
+      this.mesh.rotation.x = 0
+      this.mesh.rotation.z = ang * (this.fallDir < 0 ? 1 : -1)
+    }
   }
 
   resolveMelee(dist, dy, reach) {
@@ -335,6 +409,8 @@ export class Npc {
     const built = buildNpcMesh(spec, this.race, spec.faction ? FACTIONS[spec.faction].color : null)
     this.mesh = built.group
     this.anim = built.anim
+    this.rig = built.rig
+    this.seed = Math.random() * 13
     this.lodSwitch = new LodSwitch(this.mesh, built.anim, 28)
     this.pos = new THREE.Vector3(spec.x, y, spec.z)
     this.home = this.pos.clone()
@@ -360,8 +436,19 @@ export class Npc {
     let moving = 0
     const pc = this.game.pc
     const toP = Math.hypot(pc.pos.x - this.pos.x, pc.pos.z - this.pos.z)
+    let look = null
+    const toYaw = Math.atan2(pc.pos.x - this.pos.x, pc.pos.z - this.pos.z)
     if (talkingTo === this || toP < 3.5) {
-      this.yaw = lerpAngle(this.yaw, Math.atan2(pc.pos.x - this.pos.x, pc.pos.z - this.pos.z), Math.min(1, dt * 5))
+      this.yaw = lerpAngle(this.yaw, toYaw, Math.min(1, dt * 5))
+    } else if (toP < 9) {
+      // passers-by follow you with their eyes
+      let d = toYaw - this.yaw
+      while (d > Math.PI) d -= Math.PI * 2
+      while (d < -Math.PI) d += Math.PI * 2
+      if (Math.abs(d) < 1.6) look = d
+    }
+    if (talkingTo === this || toP < 3.5) {
+      // already facing
     } else if (this.spec.wander) {
       if (!this.target) {
         this.waitT -= dt
@@ -389,7 +476,8 @@ export class Npc {
     }
     this.mesh.position.copy(this.pos)
     this.mesh.rotation.y = this.yaw
-    if (this.lodSwitch.update(toP)) this.anim(this.t, moving, 0)
+    this.look = this.look == null || look == null ? look : this.look + (look - this.look) * Math.min(1, dt * 4)
+    if (this.lodSwitch.update(toP)) this.anim(this.t, moving, 0, { look: this.look, seed: this.seed, talk: talkingTo === this ? !!this.talking : undefined })
   }
 }
 
@@ -428,7 +516,7 @@ export class Projectile {
       if (arrow.enchant?.element) this.mesh.add(new THREE.PointLight(col, 2, 5, 2))
     } else {
       this.mesh = new THREE.Group()
-      const core = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), new THREE.MeshBasicMaterial({ color }))
+      const core = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(3) }))
       const halo = new THREE.Mesh(new THREE.SphereGeometry(0.4, 10, 8), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false }))
       this.mesh.add(core, halo)
       this.light = new THREE.PointLight(color, 4, 10, 2)
