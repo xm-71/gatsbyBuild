@@ -104,7 +104,7 @@ export class UI {
     this.screen.classList.remove("hidden")
     this.screen.innerHTML = `
       <div class="title-wrap">
-        <div class="logo"><div class="logo-sub">A procedural roguelike of Vvardenfell</div><h1>ASHFALL</h1><div class="logo-sub">Every run a new island · one life · no saves</div></div>
+        <div class="logo"><div class="logo-sub">A procedural roguelike of Vvardenfell</div><h1>ASHFALL</h1><div class="logo-sub">Every run a new island · one life · permadeath</div></div>
         <div class="panel title-panel">
           <label>World seed</label>
           <div class="row"><input id="seed" value="${esc(this.game.seed)}" spellcheck="false"><button data-act="reroll" title="Random seed">⟳</button></div>

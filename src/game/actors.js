@@ -2,7 +2,7 @@ import * as THREE from "three"
 import { CREATURES } from "../data/creatures.js"
 import { RACES } from "../data/stats.js"
 import { FACTIONS } from "../data/factions.js"
-import { buildCreatureMesh, buildNpcMesh } from "../render/creatures.js"
+import { buildCreatureMesh, buildNpcMesh, LodSwitch } from "../render/creatures.js"
 import { makeLabel } from "../render/textures.js"
 import { hitChance, evasionOf, applyArmor } from "../logic/combat.js"
 import { getAttr, getSkill } from "../logic/character.js"
@@ -56,6 +56,7 @@ export class Enemy {
     this.mesh = built.group
     if (this.boss) this.mesh.scale.multiplyScalar(1.25)
     this.anim = built.anim
+    this.lodSwitch = new LodSwitch(this.mesh.children[0] ? this.mesh : this.mesh, built.anim, 35)
     this.mesh.position.copy(this.pos)
     this.mesh.traverse(o => {
       if (o.isMesh) o.castShadow = true
@@ -234,7 +235,7 @@ export class Enemy {
     }
     this.mesh.position.copy(this.pos)
     this.mesh.rotation.y = this.yaw
-    this.anim(this.t, speed > 0 ? Math.min(1, speed / 3) : 0, this.attackAnim)
+    if (this.lodSwitch.update(dist)) this.anim(this.t, speed > 0 ? Math.min(1, speed / 3) : 0, this.attackAnim)
   }
 
   resolveMelee(dist, dy, reach) {
@@ -272,6 +273,7 @@ export class Npc {
     const built = buildNpcMesh(spec, this.race, spec.faction ? FACTIONS[spec.faction].color : null)
     this.mesh = built.group
     this.anim = built.anim
+    this.lodSwitch = new LodSwitch(this.mesh, built.anim, 28)
     this.pos = new THREE.Vector3(spec.x, y, spec.z)
     this.home = this.pos.clone()
     this.yaw = Math.random() * Math.PI * 2
@@ -325,7 +327,7 @@ export class Npc {
     }
     this.mesh.position.copy(this.pos)
     this.mesh.rotation.y = this.yaw
-    this.anim(this.t, moving, 0)
+    if (this.lodSwitch.update(toP)) this.anim(this.t, moving, 0)
   }
 }
 

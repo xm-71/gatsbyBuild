@@ -1,6 +1,6 @@
 # Ashfall — a procedural Vvardenfell roguelike
 
-A first-person, fully procedural roguelike in the spirit of *The Elder Scrolls III: Morrowind*, built with Three.js and Vite. Every run generates a new island from a seed. You get one life and no saves.
+A first-person, fully procedural roguelike in the spirit of *The Elder Scrolls III: Morrowind*, built with Three.js and Vite. Every run generates a new island from a seed. You get one life: the run is saved when you leave and resumed with **Continue**, but the save is erased when you die.
 
 ## Play
 
@@ -11,14 +11,17 @@ npm run build    # static build in dist/ (relative paths, host anywhere)
 npm test         # logic tests (world gen, dungeons, leveling, quests)
 ```
 
-Click the game to capture the mouse. Esc releases it.
+Click the game to capture the mouse. Esc releases it. Every key below can be rebound in **Settings** (title screen or the in-game menu), which also has mouse sensitivity, invert Y, field of view, music and effects volume, and a compass toggle.
+
+The compass at the top of the screen points to your current quest targets and nearby places, and quest targets also appear on the map.
 
 | Key | Action |
 | --- | --- |
 | WASD / mouse | Move / look |
 | Left mouse (hold, release) | Attack. Holding longer gives a stronger swing or a fuller bow draw |
 | F or right mouse | Cast the selected spell |
-| Mouse wheel, 1–9, [ ] | Select a spell or power |
+| 1–9 | Use a quick-slot (spell, power, potion or weapon). Assign slots from the inventory or magic tab |
+| Mouse wheel, [ ] | Select a spell or power |
 | E | Talk, open, loot, enter doors, use stairs |
 | Shift / Space / C | Sprint / jump / toggle sneak |
 | Q | Drink a healing potion |
@@ -27,7 +30,7 @@ Click the game to capture the mouse. Esc releases it.
 
 ## Graphics
 
-Pick **Low / Medium / High** on the title screen. Your choice is remembered, and changing it reloads the page. All art is generated at load time, in parallel web workers:
+Pick **Low / Medium / High** in Settings. Your choice is remembered, and changing it reloads the page. All art is generated at load time, in parallel web workers:
 
 - **Textures:** about 60 procedural colour and normal maps. They cover terrain (grass, ash, rock, sand, mud, volcanic rock, dirt), architecture (plaster, timber, shingles, stone blocks, Redoran chitin, Telvanni mushroom, hide, Dwemer brass, Daedric stone, flesh) and a character/creature atlas (faces, skin, scales, fur, fabric, chainmail, plate, bonemold, bone, chitin, membrane).
 - **Terrain:** split into chunks and texture-splatted with per-texture normal maps. It has fine height detail, glowing animated lava and two-layer animated water.
@@ -45,6 +48,8 @@ Pick **Low / Medium / High** on the title screen. Your choice is remembered, and
 | Terrain grid | 256² | 512² | 768² |
 | Shadows | off | 2048 | 4096 |
 | Grass carpet | off | yes | dense |
+
+The world is generated in a background worker, and the island is built step by step behind a progress bar. Distant trees and parasols switch to simpler models, and far-off characters and creatures switch to a single merged model. This cuts the triangle count by about two thirds with no visible change.
 
 ## What's generated
 

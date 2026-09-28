@@ -70,7 +70,8 @@ export class OverworldArea {
     steps.push({
       label: "Growing emperor parasols",
       run: () => {
-        this.scene.add(buildFlora(world, this.colliders))
+        this.flora = buildFlora(world, this.colliders)
+        this.scene.add(this.flora)
         this.grass = new GrassField(world, world.towns)
         this.scene.add(this.grass.mesh)
         this.sky = new Sky(this.scene)
@@ -174,6 +175,7 @@ export class OverworldArea {
     const g = this.game
     this.animate(dt)
     this.grass.update(g.pc.pos.x, g.pc.pos.z)
+    this.flora.userData.update(g.pc.pos.x, g.pc.pos.z)
     this.spawnTimer -= dt
     if (this.spawnTimer <= 0) {
       this.spawnTimer = 2.5

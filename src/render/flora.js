@@ -245,44 +245,120 @@ export function buildFlora(world, colliders) {
     if (!byKey.has(key)) byKey.set(key, [])
     byKey.get(key).push(f)
   }
-  const models = {}
+  const trunkItems = new Set(world.flora)
   const m = new THREE.Matrix4()
   const q = new THREE.Quaternion()
   const s = new THREE.Vector3()
   const p = new THREE.Vector3()
   const up = new THREE.Vector3(0, 1, 0)
   const col = new THREE.Color()
+  const sets = []
   for (const [key, items] of byKey) {
     const [type, v] = key.split(":")
-    models[key] ||= BUILDERS[type](new RNG(`${type}:${v}:${world.seed}`))
-    for (const part of models[key]) {
-      const inst = new THREE.InstancedMesh(part.geo, part.mat, items.length)
-      const leafy = part.mat === M("leaves") || part.mat === M("needles") || part.mat === M("fern") || part.mat === M("grass")
-      inst.castShadow = Q.shadows && type !== "grass" && type !== "shrub" && (!leafy || Q.seg >= 1)
-      inst.receiveShadow = true
-      items.forEach((f, i) => {
-        q.setFromAxisAngle(up, f.rot)
-        s.setScalar(f.scale)
-        p.set(f.x, f.y - 0.05, f.z)
-        m.compose(p, q, s)
-        inst.setMatrixAt(i, m)
-        const matKey = Object.keys(mats).find(k => mats[k] === part.mat)
-        if (TINTED[matKey]) {
-          const R = REGIONS[world.regionAt(f.x, f.z)]
-          col.setRGB(R.high[0] / 255, R.high[1] / 255, R.high[2] / 255, THREE.SRGBColorSpace)
-          const lum = (col.r + col.g + col.b) / 3 || 1
-          const k = 0.85 + ((f.rot * 1000) % 1) * 0.3
-          col.setRGB((0.55 + (col.r / lum) * 0.45) * k, (0.55 + (col.g / lum) * 0.45) * k, (0.55 + (col.b / lum) * 0.45) * k)
-          inst.setColorAt(i, col)
-        }
-      })
-      inst.computeBoundingSphere()
-      group.add(inst)
+    const seed = `${type}:${v}:${world.seed}`
+    const high = BUILDERS[type](new RNG(seed))
+    // the far model: same shape and seed, built with far fewer segments
+    let low = null
+    if (!SMALL[type]) {
+      const saved = Q.seg
+      Q.seg = Math.min(saved, 0.4)
+      low = BUILDERS[type](new RNG(seed))
+      Q.seg = saved
     }
-    if (TRUNK_RADIUS[type]) for (const f of items) if (world.flora.includes(f)) colliders.addCircle(f.x, f.z, TRUNK_RADIUS[type] * f.scale)
+    const n = items.length
+    const matrices = new Float32Array(n * 16)
+    const colors = new Float32Array(n * 3)
+    items.forEach((f, i) => {
+      q.setFromAxisAngle(up, f.rot)
+      s.setScalar(f.scale)
+      p.set(f.x, f.y - 0.05, f.z)
+      m.compose(p, q, s)
+      m.toArray(matrices, i * 16)
+      const R = REGIONS[world.regionAt(f.x, f.z)]
+      col.setRGB(R.high[0] / 255, R.high[1] / 255, R.high[2] / 255, THREE.SRGBColorSpace)
+      const lum = (col.r + col.g + col.b) / 3 || 1
+      const k = 0.85 + ((f.rot * 1000) % 1) * 0.3
+      colors[i * 3] = (0.55 + (col.r / lum) * 0.45) * k
+      colors[i * 3 + 1] = (0.55 + (col.g / lum) * 0.45) * k
+      colors[i * 3 + 2] = (0.55 + (col.b / lum) * 0.45) * k
+    })
+    const makeInst = (parts, shadows) =>
+      parts.map(part => {
+        const inst = new THREE.InstancedMesh(part.geo, part.mat, n)
+        const leafy = part.mat === M("leaves") || part.mat === M("needles") || part.mat === M("fern") || part.mat === M("grass")
+        inst.castShadow = shadows && Q.shadows && !SMALL[type] && (!leafy || Q.seg >= 1)
+        inst.receiveShadow = true
+        const matKey = Object.keys(mats).find(k2 => mats[k2] === part.mat)
+        inst.userData.tinted = !!TINTED[matKey]
+        if (inst.userData.tinted) inst.setColorAt(0, col.setRGB(1, 1, 1))
+        inst.count = 0
+        group.add(inst)
+        return inst
+      })
+    sets.push({ type, items, matrices, colors, near: makeInst(high, true), far: low ? makeInst(low, false) : [] })
+    if (TRUNK_RADIUS[type]) for (const f of items) if (trunkItems.has(f)) colliders.addCircle(f.x, f.z, TRUNK_RADIUS[type] * f.scale)
   }
+
+  // Re-sort instances into near (full detail, shadows) and far (light, no shadows)
+  // whenever the player has moved a little.
+  const last = { x: 1e9, z: 1e9 }
+  const fill = (insts, idx, set) => {
+    for (const inst of insts) {
+      const arr = inst.instanceMatrix.array
+      const carr = inst.instanceColor?.array
+      for (let k = 0; k < idx.length; k++) {
+        const i = idx[k]
+        arr.set(set.matrices.subarray(i * 16, i * 16 + 16), k * 16)
+        if (carr && inst.userData.tinted) carr.set(set.colors.subarray(i * 3, i * 3 + 3), k * 3)
+      }
+      inst.count = idx.length
+      inst.instanceMatrix.needsUpdate = true
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true
+      inst.computeBoundingSphere()
+    }
+  }
+  group.userData.update = (px, pz, force = false) => {
+    if (!force && Math.hypot(px - last.x, pz - last.z) < 12) return
+    last.x = px
+    last.z = pz
+    const near2 = (NEAR_DIST * Q.drawDist) ** 2
+    const small2 = (SMALL_DIST * Q.drawDist) ** 2
+    const far2 = (FAR_DIST * Q.drawDist) ** 2
+    for (const set of sets) {
+      const nearIdx = []
+      const farIdx = []
+      const small = !!SMALL[set.type]
+      for (let i = 0; i < set.items.length; i++) {
+        const f = set.items[i]
+        const d2 = (f.x - px) ** 2 + (f.z - pz) ** 2
+        if (small) {
+          if (d2 < small2) nearIdx.push(i)
+        } else if (d2 < near2) nearIdx.push(i)
+        else if (d2 < far2) farIdx.push(i)
+      }
+      fill(set.near, nearIdx, set)
+      if (set.far.length) fill(set.far, farIdx, set)
+    }
+  }
+  // everything visible until the first update (title fly-over looks from far away)
+  group.userData.showAll = () => {
+    for (const set of sets) {
+      const all = set.items.map((_, i) => i)
+      if (set.far.length) {
+        fill(set.far, all, set)
+        fill(set.near, [], set)
+      } else fill(set.near, [], set)
+    }
+    last.x = 1e9
+  }
+  group.userData.showAll()
   return group
 }
+
+const NEAR_DIST = 80
+const SMALL_DIST = 60
+const FAR_DIST = 520
+const SMALL = { shrub: true, grass: true, trama: true }
 
 // ---------------------------------------------------------------------------
 // Dense grass carpet that follows the player (render-only).

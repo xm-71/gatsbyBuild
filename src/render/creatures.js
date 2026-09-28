@@ -833,3 +833,42 @@ export function buildNpcMesh(npc, race, factionColor) {
   if (raceKey === "bosmer") holder.scale.setScalar(0.92)
   return { group: holder, anim: built.anim, head: built.head }
 }
+
+// Distance level of detail: bake a character's current pose into one merged
+// mesh per material (one or two draw calls instead of a dozen).
+export function makeLod(root) {
+  const b = new Builder()
+  root.updateMatrix()
+  b.addObject(root, new THREE.Matrix4(), "keep")
+  const g = b.build({ castShadow: Q.charShadows, receiveShadow: false })
+  g.visible = false
+  return g
+}
+
+// Swap between the animated model and its baked LOD by distance.
+export class LodSwitch {
+  constructor(holder, anim, dist = 30) {
+    this.holder = holder
+    this.root = holder.children[0]
+    this.anim = anim
+    this.dist = dist
+    this.lod = null
+    this.far = false
+  }
+
+  // Returns true when the animated model is showing (so the caller animates it).
+  update(distance) {
+    const far = distance > this.dist
+    if (far && !this.lod) {
+      this.anim(0, 0, 0) // bake a neutral pose
+      this.lod = makeLod(this.root)
+      this.holder.add(this.lod)
+    }
+    if (far !== this.far) {
+      this.far = far
+      this.root.visible = !far
+      if (this.lod) this.lod.visible = far
+    }
+    return !far
+  }
+}
