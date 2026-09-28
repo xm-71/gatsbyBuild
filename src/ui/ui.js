@@ -10,6 +10,8 @@ import { randomSeed } from "../core/rng.js"
 import { hideLoading } from "./loading.js"
 import { settings, updateSettings, bindKey, resetKeys, ACTIONS, keyLabel } from "../core/settings.js"
 import { readSave, describeSave } from "../game/save.js"
+import { questTargets, nearbyPlaces } from "../game/markers.js"
+import { CELL as DCELL } from "../logic/dungeongen.js"
 import { PRESETS, qualityName, setQuality } from "../core/quality.js"
 import * as D from "../game/dialogue.js"
 import { usePotion, eatItem, doRest } from "../game/player.js"
@@ -261,7 +263,8 @@ export class UI {
       <div class="equip"><div class="slot weapon"></div><div class="slot spell"></div><div class="slot effects"></div></div>
       <div class="mapbox"><div class="status"></div><canvas width="170" height="170"></canvas><div class="compass">N</div></div>
       <div class="sneak hidden">◉ Sneaking</div>
-      <div class="quickbar"></div>`
+      <div class="quickbar"></div>
+      <div class="compassbar"><div class="cb-track"></div></div>`
     this.h = {
       prompt: this.hud.querySelector(".prompt"),
       target: this.hud.querySelector(".target"),
@@ -278,6 +281,8 @@ export class UI {
       vignette: this.hud.querySelector(".vignette"),
       sneak: this.hud.querySelector(".sneak"),
       quickbar: this.hud.querySelector(".quickbar"),
+      compass: this.hud.querySelector(".compassbar"),
+      compassTrack: this.hud.querySelector(".cb-track"),
     }
   }
 
@@ -326,6 +331,59 @@ export class UI {
     this.h.status.textContent = `Day ${Math.floor(g.time / 24) + 1} ${hh}:${mm} · ${place}${g.area.kind === "overworld" && g.weather !== "clear" ? " · " + g.weather : ""}`
     this.drawMinimap()
     this.drawQuickbar()
+    this.drawCompass()
+  }
+
+  // Top-of-screen compass: cardinal points plus quest and place markers.
+  drawCompass() {
+    const g = this.game
+    const on = settings.compass
+    this.h.compass.classList.toggle("hidden", !on)
+    if (!on) return
+    const now = performance.now()
+    if (now - (this.compassT || 0) < 80) return
+    this.compassT = now
+    const heading = -g.pc.yaw // radians clockwise from north (-z)
+    const W = this.h.compass.clientWidth || 420
+    const span = Math.PI / 2 // half the field shown
+    const place = bearing => {
+      let d = bearing - heading
+      d = Math.atan2(Math.sin(d), Math.cos(d))
+      return Math.abs(d) <= span ? W / 2 + (d / span) * (W / 2) : null
+    }
+    const parts = []
+    const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+    dirs.forEach((label, i) => {
+      const x = place((i * Math.PI) / 4)
+      if (x !== null) parts.push(`<span class="cb-dir ${label.length === 1 ? "major" : ""}" style="left:${x}px">${label}</span>`)
+    })
+    for (let i = 0; i < 24; i++) {
+      const x = place((i * Math.PI) / 12)
+      if (x !== null && i % 3) parts.push(`<i class="cb-tick" style="left:${x}px"></i>`)
+    }
+    const px = g.pc.pos.x
+    const pz = g.pc.pos.z
+    let marks = []
+    if (g.area.kind === "overworld") {
+      marks = [...nearbyPlaces(g, px, pz), ...questTargets(g)]
+    } else {
+      const a = g.area
+      const seen = cell => cell && a.explored[cell.y * a.lvl.w + cell.x]
+      if (seen(a.lvl.entry)) marks.push({ x: a.upStairs.position.x, z: a.upStairs.position.z, label: a.levelIndex === 0 ? "Exit" : "Stairs up", kind: "place" })
+      if (a.downStairs && seen(a.lvl.stairsDown)) marks.push({ x: a.downStairs.position.x, z: a.downStairs.position.z, label: "Stairs down", kind: "quest" })
+      void DCELL
+    }
+    for (const m of marks) {
+      const dx = m.x - px
+      const dz = m.z - pz
+      const dist = Math.hypot(dx, dz)
+      if (dist < 4) continue
+      const x = place(Math.atan2(dx, -dz))
+      if (x === null) continue
+      const important = m.kind === "quest" || m.kind === "main"
+      parts.push(`<span class="cb-mark ${m.kind}" style="left:${x}px" title="${esc(m.label)}">${important ? "◆" : m.kind === "town" ? "■" : "•"}${important ? `<em>${dist < 1000 ? Math.round(dist) + " m" : (dist / 1000).toFixed(1) + " km"}</em>` : ""}</span>`)
+    }
+    this.h.compassTrack.innerHTML = parts.join("")
   }
 
   drawQuickbar() {
@@ -427,6 +485,22 @@ export class UI {
       if (big) {
         ctx.fillStyle = "#e8dcc0"
         ctx.fillText(d.name, px + 6, py + 4)
+      }
+    }
+    for (const m of questTargets(g)) {
+      if (world.dungeons.some(d => d.x === m.x && d.z === m.z)) continue // dungeons are marked below
+      const [x, y] = this.toMap(m.x, m.z, S)
+      const px = x * scale + ox
+      const py = y * scale + oy
+      ctx.strokeStyle = "#ffd040"
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(px, py, big ? 9 : 6, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.lineWidth = 1
+      if (big) {
+        ctx.fillStyle = "#ffd040"
+        ctx.fillText(m.label, px + 11, py + 14)
       }
     }
     for (const t of world.towns) {

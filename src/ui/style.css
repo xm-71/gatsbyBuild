@@ -76,7 +76,7 @@ tr.win td { color: var(--gold); }
 .vignette { position: absolute; inset: 0; box-shadow: inset 0 0 160px 60px rgba(200, 20, 10, 0.9); opacity: 0; }
 .crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -52%); color: rgba(255, 240, 200, 0.7); font-size: 20px; }
 .prompt { position: absolute; left: 50%; top: calc(50% + 26px); transform: translateX(-50%); color: #f0e0b0; text-shadow: 0 1px 3px #000; font-size: 18px; white-space: nowrap; }
-.target { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: 260px; text-align: center; text-shadow: 0 1px 3px #000; }
+.target { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); width: 260px; text-align: center; text-shadow: 0 1px 3px #000; }
 .target .bar { height: 10px; }
 .bar { background: rgba(0, 0, 0, 0.6); border: 1px solid var(--border); position: relative; }
 .bar .fill { position: absolute; left: 0; bottom: 0; height: 100%; width: 100%; }
@@ -185,3 +185,18 @@ p.small { font-size: 13px; margin: 2px 0; }
 .slotpick span { margin-right: 4px; font-size: 13px; }
 .sneak { bottom: 66px; }
 @media (max-width: 900px) { .quickbar { display: none; } }
+
+.compassbar { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 420px; height: 44px; background: linear-gradient(90deg, transparent, rgba(10, 8, 5, 0.7) 12%, rgba(10, 8, 5, 0.7) 88%, transparent); border-top: 1px solid rgba(122, 96, 48, 0.6); border-bottom: 1px solid rgba(122, 96, 48, 0.6); overflow: hidden; pointer-events: auto; }
+.compassbar::after { content: ""; position: absolute; left: 50%; top: 0; width: 2px; height: 7px; background: var(--gold); transform: translateX(-50%); }
+.cb-track { position: absolute; inset: 0; }
+.cb-dir { position: absolute; top: 7px; transform: translateX(-50%); font-family: Cinzel, Georgia, serif; font-size: 12px; color: var(--dim); }
+.cb-dir.major { color: var(--head); font-size: 15px; top: 5px; }
+.cb-tick { position: absolute; top: 12px; width: 1px; height: 8px; background: rgba(201, 184, 143, 0.35); }
+.cb-mark { position: absolute; top: 2px; transform: translateX(-50%); font-size: 13px; line-height: 1; text-align: center; color: #d8c8a0; text-shadow: 0 0 3px #000; cursor: default; }
+.cb-mark.town { color: #fff4c8; font-size: 10px; top: 20px; }
+.cb-mark.place { color: #c9b88f; top: 18px; }
+.cb-mark.cleared { color: #777; top: 18px; }
+.cb-mark.quest, .cb-mark.main { color: #ffd040; top: 16px; font-size: 13px; }
+.cb-mark.main { color: #ff9a40; }
+.cb-mark em { display: block; font-style: normal; font-size: 9px; margin-top: 1px; color: #f0e0b0; }
+@media (max-width: 700px) { .compassbar { width: 280px; } }
