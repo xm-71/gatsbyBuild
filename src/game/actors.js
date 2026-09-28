@@ -281,8 +281,8 @@ export class Npc {
     this.mesh.position.copy(this.pos)
     area.scene.add(this.mesh)
     if (spec.role !== "commoner" && spec.role !== "guard") {
-      const label = makeLabel(spec.role === "blade" ? "Blades Contact" : spec.title || roleTitle(spec.role), { size: 22, scale: 0.012, color: "#d8c890" })
-      label.position.set(0, 2.35, 0)
+      const label = makeLabel(spec.role === "blade" ? "Blades Contact" : spec.title || roleTitle(spec.role), { size: 22, scale: 0.0034, color: "#d8c890" })
+      label.position.set(0, 2.1, 0)
       this.mesh.add(label)
     }
   }

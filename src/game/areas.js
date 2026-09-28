@@ -1,7 +1,8 @@
 import * as THREE from "three"
 import { buildTerrain } from "../render/terrain.js"
-import { buildFlora } from "../render/flora.js"
-import { buildTown, buildEntrance } from "../render/buildings.js"
+import { buildFlora, GrassField, floraTime } from "../render/flora.js"
+import { buildTown, buildEntrance, GLOW, GLOW_COOL } from "../render/buildings.js"
+import { Q } from "../core/quality.js"
 import { buildDungeonMesh, buildChestMesh, buildStairs } from "../render/dungeonMesh.js"
 import { Sky } from "../render/sky.js"
 import { Colliders } from "./collision.js"
@@ -26,9 +27,13 @@ export class OverworldArea {
     this.spawnTimer = 0
 
     const terrain = buildTerrain(world)
-    this.scene.add(terrain.mesh, terrain.water, terrain.lava)
+    this.terrain = terrain
+    this.scene.add(terrain.mesh, terrain.water)
     this.water = terrain.water
     this.scene.add(buildFlora(world, this.colliders))
+    this.grass = new GrassField(world, world.towns)
+    this.scene.add(this.grass.mesh)
+    this.clockT = 0
     this.sky = new Sky(this.scene)
 
     this.towns = world.towns.map(t => {
@@ -104,8 +109,20 @@ export class OverworldArea {
     }
   }
 
+  // ambient animation shared by gameplay and the title fly-over
+  animate(dt) {
+    this.clockT += dt
+    floraTime.value = this.clockT
+    this.terrain.update(this.clockT)
+    const night = 1 - (this.game.daylight ?? 1)
+    GLOW.emissiveIntensity = 0.35 + night * 1.6
+    GLOW_COOL.emissiveIntensity = 0.35 + night * 1.6
+  }
+
   update(dt) {
     const g = this.game
+    this.animate(dt)
+    this.grass.update(g.pc.pos.x, g.pc.pos.z)
     this.spawnTimer -= dt
     if (this.spawnTimer <= 0) {
       this.spawnTimer = 2.5
@@ -133,7 +150,7 @@ export class OverworldArea {
       if (near) n.update(dt, g.ui.dialogueNpc)
     }
     // cull whole towns / entrances that are lost in the fog anyway
-    const far = this.scene.fog.far + 60
+    const far = (this.scene.fog.far + 60) * Q.drawDist
     for (const t of this.towns) t.group.visible = Math.hypot(t.town.x - g.pc.pos.x, t.town.z - g.pc.pos.z) < far + t.town.radius
     for (const e of this.entrances) e.group.visible = Math.hypot(e.dungeon.x - g.pc.pos.x, e.dungeon.z - g.pc.pos.z) < far
     const night = 1 - g.daylight
@@ -201,12 +218,16 @@ export class DungeonArea {
     })
     const entry = this.cellCenter(lvl.entry.x, lvl.entry.y)
     this.upStairs = buildStairs(false, this.look)
-    this.upStairs.position.copy(this.edgeFacing(lvl.entry))
+    const up = this.edgeFacing(lvl.entry)
+    this.upStairs.position.copy(up)
+    this.upStairs.rotation.y = up.rotY || 0
     this.scene.add(this.upStairs)
     this.entryPos = entry
     if (lvl.stairsDown) {
       this.downStairs = buildStairs(true, this.look)
-      this.downStairs.position.copy(this.edgeFacing(lvl.stairsDown))
+      const dn = this.edgeFacing(lvl.stairsDown)
+      this.downStairs.position.copy(dn)
+      this.downStairs.rotation.y = dn.rotY || 0
       this.scene.add(this.downStairs)
       this.downPos = this.cellCenter(lvl.stairsDown.x, lvl.stairsDown.y)
     }
@@ -221,6 +242,7 @@ export class DungeonArea {
     for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
       if (!this.isFloorCell(cell.x + dx, cell.y + dy)) {
         const v = new THREE.Vector3(c.x + dx * (CELL / 2 - 0.3), 0, c.z + dy * (CELL / 2 - 0.3))
+        v.rotY = Math.atan2(-dx, -dy)
         return v
       }
     }

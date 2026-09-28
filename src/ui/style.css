@@ -144,3 +144,5 @@ hr { border: none; border-top: 1px solid var(--border); width: 100%; }
   .inv, .charsheet, .journal, .barter, .dlg-body { grid-template-columns: 1fr; }
   .mapbox canvas { width: 120px; height: 120px; }
 }
+
+.small-note { font-size: 12px; margin-left: 6px; }

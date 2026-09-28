@@ -106,6 +106,8 @@ export function generateWorld(seed) {
   const N = WORLD_RES + 1
   const cell = WORLD_SIZE / WORLD_RES
   const heights = new Float32Array(N * N)
+  const flatMask = new Float32Array(N * N).fill(1)
+  const dnoise = createNoise2D(`detail:${seed}`)
   const regions = new Uint8Array(N * N)
   for (let j = 0; j < N; j++) {
     for (let i = 0; i < N; i++) {
@@ -134,7 +136,9 @@ export function generateWorld(seed) {
     if (tx + tz <= 1) return a + (b - a) * tx + (c - a) * tz
     return d + (c - d) * (1 - tx) + (b - d) * (1 - tz)
   }
-  const heightAt = (x, z) => sample(heights, x, z)
+  // Fine surface detail (bumps, hummocks) layered on the coarse grid; faded out in towns.
+  const detailAt = (x, z) => dnoise.fbm(x * 0.07, z * 0.07, 3) * 1.1 + dnoise.noise(x * 0.31, z * 0.31) * 0.18
+  const heightAt = (x, z) => sample(heights, x, z) + detailAt(x, z) * sample(flatMask, x, z)
   const regionAt = (x, z) => {
     const i = Math.round(Math.max(0, Math.min(WORLD_RES, (x + half) / cell)))
     const j = Math.round(Math.max(0, Math.min(WORLD_RES, (z + half) / cell)))
@@ -162,6 +166,7 @@ export function generateWorld(seed) {
         if (d > r2) continue
         const t = d < radius ? 1 : 1 - smoothstep(radius, r2, d)
         heights[j * N + i] = heights[j * N + i] * (1 - t) + targetH * t
+        flatMask[j * N + i] *= 1 - t
       }
     }
   }

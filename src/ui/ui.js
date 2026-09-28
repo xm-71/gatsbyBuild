@@ -7,6 +7,7 @@ import { createCharacter, getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, 
 import { describeItem } from "../logic/items.js"
 import { spellChance, buyPrice, sellPrice } from "../logic/combat.js"
 import { randomSeed } from "../core/rng.js"
+import { PRESETS, qualityName, setQuality } from "../core/quality.js"
 import * as D from "../game/dialogue.js"
 import { usePotion, eatItem, doRest } from "../game/player.js"
 
@@ -80,6 +81,7 @@ export class UI {
         <div class="panel title-panel">
           <label>World seed</label>
           <div class="row"><input id="seed" value="${esc(this.game.seed)}" spellcheck="false"><button data-act="reroll" title="Random seed">⟳</button></div>
+          <div class="row"><label>Graphics</label>${Object.entries(PRESETS).map(([k, p]) => `<button class="${k === qualityName ? "sel" : ""}" data-act="quality" data-arg="${k}">${p.name}</button>`).join("")}<span class="dim small-note">changing reloads the page</span></div>
           <button class="big" data-act="new">New Run</button>
           <details><summary>How to play</summary>
             <p>Create a character, then survive a freshly generated Vvardenfell. Talk to the Blades contact in your starting town to learn the main quest: recover Kagrenac's three tools from the strongholds that hold them, then descend into the Citadel under Red Mountain and slay the Dagoth lord. Death is permanent.</p>
@@ -99,6 +101,16 @@ export class UI {
         </div>
       </div>`
     bind(this.screen, {
+      quality: q => {
+        if (q === qualityName) return
+        setQuality(q)
+        try {
+          sessionStorage.setItem("ashfall-seed", this.screen.querySelector("#seed").value)
+        } catch {
+          /* ignore */
+        }
+        location.reload()
+      },
       reroll: () => {
         const s = randomSeed()
         this.screen.querySelector("#seed").value = s

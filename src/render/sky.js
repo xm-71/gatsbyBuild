@@ -1,4 +1,6 @@
 import * as THREE from "three"
+import { cardTexture } from "./texgen.js"
+import { Q } from "../core/quality.js"
 
 // Day/night sky colour, sun, the moons Masser and Secunda, stars, and weather particles.
 export class Sky {
@@ -7,8 +9,8 @@ export class Sky {
     this.hemi = new THREE.HemisphereLight(0xbfcfe0, 0x5a4a3a, 1.2)
     scene.add(this.hemi)
     this.sun = new THREE.DirectionalLight(0xfff0d8, 2.2)
-    this.sun.castShadow = true
-    this.sun.shadow.mapSize.set(2048, 2048)
+    this.sun.castShadow = Q.shadows
+    this.sun.shadow.mapSize.set(Q.shadowMap, Q.shadowMap)
     const c = this.sun.shadow.camera
     c.left = c.bottom = -60
     c.right = c.top = 60
@@ -19,10 +21,43 @@ export class Sky {
 
     this.dome = new THREE.Group()
     scene.add(this.dome)
-    const moonMat = (color, op = 1) => new THREE.MeshBasicMaterial({ color, fog: false, transparent: op < 1, opacity: op })
+    // gradient sky with a sun glow
+    this.skyUniforms = {
+      zenith: { value: new THREE.Color(0x3a5a80) },
+      horizon: { value: new THREE.Color(0xa0a8a8) },
+      sunDir: { value: new THREE.Vector3(0, 1, 0) },
+      sunColor: { value: new THREE.Color(0xfff0c8) },
+      sunAmt: { value: 1 },
+    }
+    const skyMat = new THREE.ShaderMaterial({
+      uniforms: this.skyUniforms,
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      vertexShader: "varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+      fragmentShader: `uniform vec3 zenith; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunColor; uniform float sunAmt; varying vec3 vDir;
+        void main(){ float h = clamp(vDir.y, -0.2, 1.0); vec3 c = mix(horizon, zenith, pow(max(h, 0.0), 0.55));
+        float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
+        c += sunColor * (pow(s, 600.0) * 3.0 + pow(s, 12.0) * 0.35) * sunAmt;
+        gl_FragColor = vec4(c, 1.0);
+        #include <colorspace_fragment>
+        }`,
+    })
+    this.skyDome = new THREE.Mesh(new THREE.SphereGeometry(950, 32, 16), skyMat)
+    this.skyDome.renderOrder = -2
+    this.skyDome.frustumCulled = false
+    this.dome.add(this.skyDome)
+    const clouds = cardTexture("clouds")
+    clouds.repeat.set(3, 3)
+    this.cloudMat = new THREE.MeshBasicMaterial({ map: clouds, transparent: true, depthWrite: false, fog: false, side: THREE.BackSide, opacity: 0.8 })
+    this.clouds = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 12, 0, Math.PI * 2, 0, Math.PI * 0.48), this.cloudMat)
+    this.clouds.renderOrder = -1
+    this.clouds.frustumCulled = false
+    this.dome.add(this.clouds)
+    const moonMat = (color, op = 1) => new THREE.MeshBasicMaterial({ color, map: cardTexture("moon"), fog: false, transparent: op < 1, opacity: op })
     this.masser = new THREE.Mesh(new THREE.SphereGeometry(28, 16, 12), moonMat(0xd8806a))
     this.secunda = new THREE.Mesh(new THREE.SphereGeometry(12, 12, 10), moonMat(0xe0e0e8))
-    this.sunDisc = new THREE.Mesh(new THREE.SphereGeometry(20, 16, 12), moonMat(0xfff4c0))
+    this.sunDisc = new THREE.Mesh(new THREE.SphereGeometry(16, 16, 12), new THREE.MeshBasicMaterial({ color: 0xfff8e0, fog: false }))
     this.dome.add(this.masser, this.secunda, this.sunDisc)
 
     const starGeo = new THREE.BufferGeometry()
@@ -82,6 +117,11 @@ export class Sky {
       visibility = 0.85
     }
     fog.color.copy(this.skyColor)
+    this.skyUniforms.horizon.value.copy(this.skyColor)
+    this.skyUniforms.zenith.value.copy(this.skyColor).lerp(new THREE.Color(0x2a4a78), 0.55 * day * visibility).multiplyScalar(0.55 + 0.35 * day)
+    this.cloudMat.color.copy(this.skyColor).lerp(new THREE.Color(0xffffff), 0.35 * day)
+    this.cloudMat.opacity = this.weather === "clear" ? 0.45 : this.weather === "cloudy" ? 0.95 : 0.85
+    this.cloudMat.map.offset.x += dt * 0.0015
     fog.near = 40 * visibility
     fog.far = (140 + 260 * day) * visibility + 60
 
@@ -90,6 +130,8 @@ export class Sky {
     const sunDir = new THREE.Vector3(Math.cos(t) * 0.8, sunH, 0.35).normalize()
     this.sunDisc.position.copy(sunDir).multiplyScalar(700)
     this.sunDisc.visible = sunH > -0.1
+    this.skyUniforms.sunDir.value.copy(sunDir)
+    this.skyUniforms.sunAmt.value = Math.max(0, Math.min(1, sunH * 4 + 0.3)) * visibility
     const mt = t + Math.PI * 0.9
     this.masser.position.set(Math.cos(mt) * 500, Math.sin(mt) * 500 + 80, -300)
     this.secunda.position.set(Math.cos(mt + 0.5) * 520, Math.sin(mt + 0.5) * 520 + 60, -200)

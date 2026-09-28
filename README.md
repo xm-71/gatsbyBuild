@@ -25,6 +25,27 @@ Click the game to capture the mouse. Esc releases it.
 | T | Rest (level-ups happen when you rest) |
 | Tab or I · K · M · J | Inventory · character · map · journal |
 
+## Graphics
+
+Pick **Low / Medium / High** on the title screen. Your choice is remembered, and changing it reloads the page. All art is generated at load time, in parallel web workers:
+
+- **Textures:** about 60 procedural colour and normal maps. They cover terrain (grass, ash, rock, sand, mud, volcanic rock, dirt), architecture (plaster, timber, shingles, stone blocks, Redoran chitin, Telvanni mushroom, hide, Dwemer brass, Daedric stone, flesh) and a character/creature atlas (faces, skin, scales, fur, fabric, chainmail, plate, bonemold, bone, chitin, membrane).
+- **Terrain:** split into chunks and texture-splatted with per-texture normal maps. It has fine height detail, glowing animated lava and two-layer animated water.
+- **Sky:** a gradient dome with sun glow, drifting clouds, and textured Masser and Secunda.
+- **Flora:** curved emperor parasols with gills and shelf fungi, layered West Gash conifers, rooted swamp trees, branching dead trees, fern and grass cards with wind sway, displaced rocks, and dense grass around the player.
+- **Architecture:** timber-framed Hlaalu houses, segmented Redoran shells with spine ribs and portholes, rooted Telvanni towers with glowing bulb windows, Imperial forts with towers, gatehouses and banners, Tribunal temples, Ashlander yurts, plaza wells, market stalls and lamp posts. Windows light up at night.
+- **Characters:** knee and elbow joints, race features (pointed elf ears, Khajiit muzzles and tails, Argonian snouts and frills, Orc tusks), hair styles, clothing layers, bonemold guard armour and held weapons.
+- **Creatures:** each has its own anatomy, from cliff racers with sails and membrane wings to Dwemer spheres and centurions.
+- **Weapons and shields:** extruded blade profiles and material finishes, including glowing glass and red-runed daedric.
+- **Dungeons:** sculpted cave rock with stalactites; built dungeons have trims, corner pillars, ceiling beams, pipes or ribs, and hanging lanterns. Props, chests and doorways are all textured.
+
+| | Low | Medium | High |
+| --- | --- | --- | --- |
+| Texture size | 256 | 512 | 1024 |
+| Terrain grid | 256² | 512² | 768² |
+| Shadows | off | 2048 | 4096 |
+| Grass carpet | off | yes | dense |
+
 ## What's generated
 
 - **The island.** A seeded heightmap with Red Mountain and its crater, surrounded by seven regions arranged at random: Ashlands, West Gash, Bitter Coast, Ascadian Isles, Grazelands, Azura's Coast and Molag Amur (with lava fields). Each region has its own palette, flora (emperor parasols, swamp trees, dead trees, grass and rocks), weather (ash storms, blight storms, rain, fog) and creatures. There's a day/night cycle, and the moons Masser and Secunda rise at night.

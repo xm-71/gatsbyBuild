@@ -143,7 +143,7 @@ export function updatePlayer(game, dt) {
   const eye = pc.sneaking ? 1.15 : 1.62
   game.camera.position.set(pc.pos.x, pc.pos.y + eye, pc.pos.z)
   game.camera.rotation.set(pc.pitch, pc.yaw, 0)
-  game.viewmodel.build(currentWeapon(c), c.equipment.shield)
+  game.viewmodel.build(currentWeapon(c), c.equipment.shield, c.equipment.cuirass, c.equipment.gauntlets)
   game.viewmodel.update(dt, moving && pc.onGround, sprint)
 
   updateAttack(game, dt)

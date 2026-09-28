@@ -16,19 +16,27 @@ import { Audio } from "./audio.js"
 import { ViewModel } from "../render/viewmodel.js"
 import { updatePlayer, spellEffectsOnEnemy } from "./player.js"
 import { UI } from "../ui/ui.js"
+import { Q } from "../core/quality.js"
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
 
 const HOURS_PER_SECOND = 2 / 60 // one real second = two game minutes
 
 export class Game {
   constructor(container) {
     this.container = container
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" })
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75))
+    this.renderer = new THREE.WebGLRenderer({ antialias: Q.antialias, powerPreference: "high-performance" })
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q.pixelRatio))
     this.renderer.setSize(window.innerWidth, window.innerHeight)
-    this.renderer.shadowMap.enabled = true
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+    this.renderer.toneMappingExposure = 1.25
+    Q.maxAniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy())
+    this.renderer.shadowMap.enabled = Q.shadows
     this.renderer.shadowMap.type = THREE.PCFShadowMap
     container.appendChild(this.renderer.domElement)
-    this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 1500)
+    // a neutral studio environment so metals (weapons, armour, Dwemer brass) have something to reflect
+    const pmrem = new THREE.PMREMGenerator(this.renderer)
+    this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 2000)
     this.camera.rotation.order = "YXZ"
     this.viewmodel = new ViewModel(this.camera)
     this.playerLight = new THREE.PointLight(0xffd8a0, 0, 16, 1.6)
@@ -48,7 +56,14 @@ export class Game {
       if (this.mode === "play" && !this.ui.modal) this.input.lock()
     })
     this.renderer.setAnimationLoop(() => this.frame())
-    this.prepareWorld(randomSeed())
+    let seed = randomSeed()
+    try {
+      seed = sessionStorage.getItem("ashfall-seed") || seed
+      sessionStorage.removeItem("ashfall-seed")
+    } catch {
+      /* storage unavailable */
+    }
+    this.prepareWorld(seed)
     this.ui.showTitle()
   }
 
@@ -65,8 +80,7 @@ export class Game {
     this.seed = seed
     this.world = generateWorld(seed)
     this.overworld = new OverworldArea(this, this.world)
-    this.area = this.overworld
-    this.area.scene.add(this.camera)
+    this.setArea(this.overworld)
     this.projectiles = []
   }
 
@@ -128,6 +142,8 @@ export class Game {
     for (const p of this.projectiles) p.destroy()
     this.projectiles = []
     this.area = area
+    area.scene.environment = this.envMap
+    area.scene.environmentIntensity = area.kind === "dungeon" ? 0.25 : 0.6
     area.scene.add(this.camera)
   }
 
@@ -206,6 +222,7 @@ export class Game {
     this.overworld.sky.update(dt, hour, this.camera, 0xb09a88, this.overworld.scene.fog)
     this.overworld.scene.fog.far = 900
     this.overworld.scene.fog.near = 200
+    this.overworld.animate(dt)
     this.overworld.scene.background = this.overworld.sky.skyColor
     this.viewmodel.root.visible = false
   }
