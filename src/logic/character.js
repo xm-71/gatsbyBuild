@@ -58,7 +58,37 @@ export function createCharacter({ name, race, cls, sign }) {
   c.health = maxHealth(c)
   c.magicka = maxMagicka(c)
   c.fatigue = maxFatigue(c)
+  // Quick-slots 1–9: start with known spells and powers, then a healing potion.
+  c.quickslots = Array(9).fill(null)
+  let n = 0
+  for (const id of [...c.spells, ...c.powers]) if (n < 8) c.quickslots[n++] = { type: "spell", id }
+  const potion = c.inventory.find(i => i.kind === "potion" && i.effect === "heal")
+  if (potion) c.quickslots[n] = slotForItem(potion)
   return c
+}
+
+// A quick-slot entry for an item. Stackable items are tracked by kind, so the
+// slot keeps working when a stack runs out and is replaced by a new one.
+export function slotForItem(item) {
+  return item.stackKey ? { type: "item", stackKey: item.stackKey, name: item.name } : { type: "item", uid: item.uid, name: item.name }
+}
+
+export function itemForSlot(c, slot) {
+  if (!slot || slot.type !== "item") return null
+  return c.inventory.find(i => (slot.stackKey ? i.stackKey === slot.stackKey : i.uid === slot.uid)) || null
+}
+
+export function assignQuickslot(c, index, entry) {
+  c.quickslots ||= Array(9).fill(null)
+  // one thing per slot, and each thing in only one slot
+  c.quickslots = c.quickslots.map(s => (s && entry && sameSlot(s, entry) ? null : s))
+  c.quickslots[index] = entry
+}
+
+function sameSlot(a, b) {
+  if (a.type !== b.type) return false
+  if (a.type === "spell") return a.id === b.id
+  return a.stackKey ? a.stackKey === b.stackKey : a.uid === b.uid
 }
 
 // ---------- derived stats ----------

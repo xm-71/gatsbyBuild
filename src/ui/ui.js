@@ -3,7 +3,7 @@ import { FACTIONS, RANK_REP } from "../data/factions.js"
 import { getSpell } from "../data/spells.js"
 import { REGIONS, SEA_LEVEL } from "../logic/worldgen.js"
 import { CELL } from "../logic/dungeongen.js"
-import { createCharacter, getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, armorRating, encumbrance, carryCapacity, equip, unequip, isEquipped, skillType, skillRequirement, canLevelUp, levelUp, attrMultiplier, fatigueRatio, addItem } from "../logic/character.js"
+import { slotForItem, assignQuickslot, itemForSlot, createCharacter, getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, armorRating, encumbrance, carryCapacity, equip, unequip, isEquipped, skillType, skillRequirement, canLevelUp, levelUp, attrMultiplier, fatigueRatio, addItem } from "../logic/character.js"
 import { describeItem } from "../logic/items.js"
 import { spellChance, buyPrice, sellPrice } from "../logic/combat.js"
 import { randomSeed } from "../core/rng.js"
@@ -260,7 +260,8 @@ export class UI {
       </div>
       <div class="equip"><div class="slot weapon"></div><div class="slot spell"></div><div class="slot effects"></div></div>
       <div class="mapbox"><div class="status"></div><canvas width="170" height="170"></canvas><div class="compass">N</div></div>
-      <div class="sneak hidden">◉ Sneaking</div>`
+      <div class="sneak hidden">◉ Sneaking</div>
+      <div class="quickbar"></div>`
     this.h = {
       prompt: this.hud.querySelector(".prompt"),
       target: this.hud.querySelector(".target"),
@@ -276,6 +277,7 @@ export class UI {
       map: this.hud.querySelector(".mapbox canvas"),
       vignette: this.hud.querySelector(".vignette"),
       sneak: this.hud.querySelector(".sneak"),
+      quickbar: this.hud.querySelector(".quickbar"),
     }
   }
 
@@ -323,6 +325,37 @@ export class UI {
     const place = g.area.kind === "overworld" ? REGIONS[g.world.regionAt(g.pc.pos.x, g.pc.pos.z)].name + (g.area.townAt(g.pc.pos.x, g.pc.pos.z, 10) ? ` · ${g.area.townAt(g.pc.pos.x, g.pc.pos.z, 10).name}` : "") : `${g.area.dungeon.name} ${g.area.levelIndex + 1}/${g.area.dungeon.levels}`
     this.h.status.textContent = `Day ${Math.floor(g.time / 24) + 1} ${hh}:${mm} · ${place}${g.area.kind === "overworld" && g.weather !== "clear" ? " · " + g.weather : ""}`
     this.drawMinimap()
+    this.drawQuickbar()
+  }
+
+  drawQuickbar() {
+    const c = this.game.char
+    const slots = c.quickslots || []
+    const html = slots
+      .map((s, k) => {
+        let label = ""
+        let cls = "qs"
+        let qty = ""
+        if (s?.type === "spell") {
+          label = getSpell(s.id)?.name || ""
+          if (c.selectedSpell === s.id) cls += " on"
+          cls += " spell"
+        } else if (s) {
+          const it = itemForSlot(c, s)
+          label = s.name
+          if (!it) cls += " gone"
+          else {
+            if (it.qty > 1) qty = `<i>${it.qty}</i>`
+            if (Object.values(c.equipment).includes(it)) cls += " on"
+          }
+        } else cls += " empty"
+        return `<div class="${cls}" title="${esc(label)}"><b>${k + 1}</b><span>${esc(label)}</span>${qty}</div>`
+      })
+      .join("")
+    if (html !== this.lastQuickbar) {
+      this.h.quickbar.innerHTML = html
+      this.lastQuickbar = html
+    }
   }
 
   // ---------------- maps ----------------
@@ -557,6 +590,7 @@ export class UI {
       drink: () => (usePotion(g, sel), this.render_inventory(body)),
       eat: () => (eatItem(g, sel), this.render_inventory(body)),
       drop: () => (g.dropItem(sel, 1), (this.selectedItem = null), this.render_inventory(body)),
+      slot: k => (assignQuickslot(c, Number(k), slotForItem(sel)), this.render_inventory(body)),
     })
   }
 
@@ -567,7 +601,15 @@ export class UI {
     if (i.kind === "potion") a.push(`<button data-act="drink">Drink</button>`)
     if (i.eat) a.push(`<button data-act="eat">Eat</button>`)
     if (i.kind !== "quest" && !i.relic && !i.bound) a.push(`<button data-act="drop">Drop</button>`)
+    if (["weapon", "armor", "ammo", "potion"].includes(i.kind) || i.eat) a.push(this.slotPicker(slotForItem(i)))
     return a.join("")
+  }
+
+  // Row of 1–9 buttons that assigns an item or spell to a quick-slot.
+  slotPicker(entry) {
+    const c = this.game.char
+    const cur = (c.quickslots || []).findIndex(s => s && s.type === entry.type && (entry.type === "spell" ? s.id === entry.id : entry.stackKey ? s.stackKey === entry.stackKey : s.uid === entry.uid))
+    return `<div class="slotpick"><span class="dim">Quick-slot</span>${Array.from({ length: 9 }, (_, k) => `<button class="${k === cur ? "sel" : ""}" data-act="slot" data-arg="${k}" title="Assign to key ${k + 1}">${k + 1}</button>`).join("")}</div>`
   }
 
   render_character(body) {
@@ -600,8 +642,12 @@ export class UI {
     }
     body.innerHTML = `<div class="magic"><h3>Powers</h3><div class="list">${c.powers.map(row).join("") || `<div class="dim">none</div>`}</div>
       <h3>Spells</h3><div class="list">${c.spells.map(row).join("") || `<div class="dim">none — buy spells from the Mages Guild, the Temple or Telvanni.</div>`}</div>
-      <p class="dim">Click to select. Cast with F or right mouse. Numbers 1–9 and the mouse wheel also select.</p></div>`
-    bind(body, { pick: id => ((c.selectedSpell = id), this.render_magic(body)) })
+      ${c.selectedSpell ? `<h3>${esc(getSpell(c.selectedSpell).name)}</h3>${this.slotPicker({ type: "spell", id: c.selectedSpell })}` : ""}
+      <p class="dim">Click to select, then assign it to a quick-slot. Cast with F or right mouse; the mouse wheel also cycles spells.</p></div>`
+    bind(body, {
+      pick: id => ((c.selectedSpell = id), this.render_magic(body)),
+      slot: k => (assignQuickslot(c, Number(k), { type: "spell", id: c.selectedSpell }), this.render_magic(body)),
+    })
   }
 
   render_map(body) {

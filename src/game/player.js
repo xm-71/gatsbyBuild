@@ -1,7 +1,7 @@
 import * as THREE from "three"
 import { SEA_LEVEL } from "../logic/worldgen.js"
 import { settings } from "../core/settings.js"
-import { getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, fatigueRatio, moveSpeed, jumpVelocity, encumbrance, addEffect, addItem, equip, removeItem, canLevelUp } from "../logic/character.js"
+import { getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, fatigueRatio, moveSpeed, jumpVelocity, encumbrance, addEffect, addItem, equip, removeItem, canLevelUp, itemForSlot } from "../logic/character.js"
 import { hitChance, meleeDamage, spellChance, lockpickChance } from "../logic/combat.js"
 import { makeItemFromSpec } from "../logic/items.js"
 import { getSpell } from "../data/spells.js"
@@ -35,7 +35,7 @@ export function updatePlayer(game, dt) {
   if (inp.actionPressed("rest")) return tryRest(game)
   if (inp.actionPressed("quaff")) quickPotion(game)
   if (inp.wheel || inp.wasPressed("BracketRight") || inp.wasPressed("BracketLeft")) cycleSpell(game, inp.wheel || (inp.wasPressed("BracketLeft") ? -1 : 1))
-  for (let i = 1; i <= 9; i++) if (inp.wasPressed(`Digit${i}`)) selectSpellIndex(game, i - 1)
+  for (let i = 1; i <= 9; i++) if (inp.wasPressed(`Digit${i}`)) useQuickslot(game, i - 1)
 
   // ---- movement ----
   const fwd = new THREE.Vector3(-Math.sin(pc.yaw), 0, -Math.cos(pc.yaw))
@@ -303,12 +303,26 @@ function cycleSpell(game, delta) {
   game.msg(`Selected: ${getSpell(c.selectedSpell).name}`, "#a0c0ff")
 }
 
-function selectSpellIndex(game, i) {
-  const list = knownCastables(game.char)
-  if (list[i]) {
-    game.char.selectedSpell = list[i]
-    game.msg(`Selected: ${getSpell(list[i]).name}`, "#a0c0ff")
+// Use quick-slot i (0-based): equip gear, drink or eat consumables, or ready a spell.
+export function useQuickslot(game, i) {
+  const c = game.char
+  const slot = c.quickslots?.[i]
+  if (!slot) return game.msg(`Quick-slot ${i + 1} is empty. Assign it from the inventory or magic menu.`, "#a8a090")
+  if (slot.type === "spell") {
+    if (!c.spells.includes(slot.id) && !c.powers.includes(slot.id)) return game.msg("You no longer know that spell.", "#ff9a7a")
+    c.selectedSpell = slot.id
+    return game.msg(`Selected: ${getSpell(slot.id).name}`, "#a0c0ff")
   }
+  const item = itemForSlot(c, slot)
+  if (!item) return game.msg(`You have no ${slot.name} left.`, "#ff9a7a")
+  if (item.kind === "potion") return usePotion(game, item)
+  if (item.eat && item.kind === "misc") return eatItem(game, item)
+  if (item.kind === "weapon" || item.kind === "armor" || item.kind === "ammo") {
+    equip(c, item)
+    game.audio.play("pickup")
+    return game.msg(`Equipped: ${item.name}`, "#c9b88f")
+  }
+  game.msg(`${item.name} can't be used from a quick-slot.`, "#a8a090")
 }
 
 export function castSelected(game) {
