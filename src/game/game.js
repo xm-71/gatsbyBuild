@@ -20,6 +20,7 @@ import { loadWorld } from "./worldLoader.js"
 import { writeSave, deleteSave, restoreRun } from "./save.js"
 import { showLoading, hideLoading } from "../ui/loading.js"
 import { Q } from "../core/quality.js"
+import { onSettingsChange } from "../core/settings.js"
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
 
 const HOURS_PER_SECOND = 2 / 60 // one real second = two game minutes
@@ -47,6 +48,12 @@ export class Game {
     this.input = new Input(this.renderer.domElement)
     this.audio = new Audio()
     this.ui = new UI(this)
+    onSettingsChange(s => {
+      this.input.sensitivity = 0.0022 * s.sensitivity
+      this.camera.fov = s.fov
+      this.camera.updateProjectionMatrix()
+      this.audio.applyVolumes()
+    })
     this.mode = "title"
     this.timer = new THREE.Timer()
     this.projectiles = []

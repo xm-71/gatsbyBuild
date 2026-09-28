@@ -1,5 +1,6 @@
 import * as THREE from "three"
 import { SEA_LEVEL } from "../logic/worldgen.js"
+import { settings } from "../core/settings.js"
 import { getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, fatigueRatio, moveSpeed, jumpVelocity, encumbrance, addEffect, addItem, equip, removeItem, canLevelUp } from "../logic/character.js"
 import { hitChance, meleeDamage, spellChance, lockpickChance } from "../logic/combat.js"
 import { makeItemFromSpec } from "../logic/items.js"
@@ -20,19 +21,19 @@ export function updatePlayer(game, dt) {
 
   // ---- look ----
   pc.yaw -= inp.mouseDX * inp.sensitivity
-  pc.pitch = Math.max(-1.52, Math.min(1.52, pc.pitch - inp.mouseDY * inp.sensitivity))
+  pc.pitch = Math.max(-1.52, Math.min(1.52, pc.pitch - inp.mouseDY * inp.sensitivity * (settings.invertY ? -1 : 1)))
 
   // ---- toggles & hotkeys ----
-  if (inp.wasPressed("KeyC")) {
+  if (inp.actionPressed("sneak")) {
     pc.sneaking = !pc.sneaking
     game.msg(pc.sneaking ? "Sneaking" : "Standing", "#a8a090")
   }
-  if (inp.wasPressed("Tab") || inp.wasPressed("KeyI")) return game.ui.openMenu("inventory")
-  if (inp.wasPressed("KeyJ")) return game.ui.openMenu("journal")
-  if (inp.wasPressed("KeyM")) return game.ui.openMenu("map")
-  if (inp.wasPressed("KeyK")) return game.ui.openMenu("character")
-  if (inp.wasPressed("KeyT")) return tryRest(game)
-  if (inp.wasPressed("KeyQ")) quickPotion(game)
+  if (inp.actionPressed("inventory") || inp.wasPressed("KeyI")) return game.ui.openMenu("inventory")
+  if (inp.actionPressed("journal")) return game.ui.openMenu("journal")
+  if (inp.actionPressed("map")) return game.ui.openMenu("map")
+  if (inp.actionPressed("character")) return game.ui.openMenu("character")
+  if (inp.actionPressed("rest")) return tryRest(game)
+  if (inp.actionPressed("quaff")) quickPotion(game)
   if (inp.wheel || inp.wasPressed("BracketRight") || inp.wasPressed("BracketLeft")) cycleSpell(game, inp.wheel || (inp.wasPressed("BracketLeft") ? -1 : 1))
   for (let i = 1; i <= 9; i++) if (inp.wasPressed(`Digit${i}`)) selectSpellIndex(game, i - 1)
 
@@ -40,13 +41,13 @@ export function updatePlayer(game, dt) {
   const fwd = new THREE.Vector3(-Math.sin(pc.yaw), 0, -Math.cos(pc.yaw))
   const right = new THREE.Vector3(Math.cos(pc.yaw), 0, -Math.sin(pc.yaw))
   const wish = new THREE.Vector3()
-  if (inp.down("KeyW") || inp.down("ArrowUp")) wish.add(fwd)
-  if (inp.down("KeyS") || inp.down("ArrowDown")) wish.sub(fwd)
-  if (inp.down("KeyD") || inp.down("ArrowRight")) wish.add(right)
-  if (inp.down("KeyA") || inp.down("ArrowLeft")) wish.sub(right)
+  if (inp.action("forward") || inp.down("ArrowUp")) wish.add(fwd)
+  if (inp.action("back") || inp.down("ArrowDown")) wish.sub(fwd)
+  if (inp.action("right") || inp.down("ArrowRight")) wish.add(right)
+  if (inp.action("left") || inp.down("ArrowLeft")) wish.sub(right)
   const moving = wish.lengthSq() > 0
   if (moving) wish.normalize()
-  const sprint = moving && (inp.down("ShiftLeft") || inp.down("ShiftRight")) && c.fatigue > 3 && !pc.sneaking
+  const sprint = moving && (inp.action("sprint") || inp.down("ShiftRight")) && c.fatigue > 3 && !pc.sneaking
   pc.sprinting = sprint
   let speed = moveSpeed(c) * (sprint ? 1.65 : 1) * (pc.sneaking ? 0.5 : 1) * (pc.swimming ? 0.6 : 1) * (c.fatigue <= 0 ? 0.7 : 1)
   if (pc.charging) speed *= 0.7
@@ -55,7 +56,7 @@ export function updatePlayer(game, dt) {
   pc.vel.z += (wish.z * speed - pc.vel.z) * Math.min(1, accel * dt)
   if (sprint) c.fatigue = Math.max(0, c.fatigue - 7 * dt)
 
-  if (inp.wasPressed("Space") && (pc.onGround || pc.swimming) && c.fatigue >= 3) {
+  if (inp.actionPressed("jump") && (pc.onGround || pc.swimming) && c.fatigue >= 3) {
     pc.vel.y = pc.swimming ? 4 : jumpVelocity(c)
     pc.onGround = false
     c.fatigue = Math.max(0, c.fatigue - (5 + encumbrance(c) / 25))
@@ -148,7 +149,7 @@ export function updatePlayer(game, dt) {
 
   updateAttack(game, dt)
   pc.castCd -= dt
-  if (inp.wasPressed("KeyF") || inp.wasPressed("Mouse2")) castSelected(game)
+  if (inp.actionPressed("cast") || inp.wasPressed("Mouse2")) castSelected(game)
   updateInteraction(game)
 }
 
@@ -518,7 +519,7 @@ function updateInteraction(game) {
     if (d < 40 && v.normalize().dot(dir) > 0.985) game.setTarget(e)
   }
   game.ui.target = best
-  if (best && game.input.wasPressed("KeyE")) activate(game, best)
+  if (best && game.input.actionPressed("activate")) activate(game, best)
 }
 
 function activate(game, it) {

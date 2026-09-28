@@ -1,3 +1,5 @@
+import { settings } from "../core/settings.js"
+
 export class Input {
   constructor(canvas) {
     this.canvas = canvas
@@ -16,7 +18,7 @@ export class Input {
       if (e.target instanceof HTMLInputElement) return
       if (!this.keys.has(e.code)) this.pressed.add(e.code)
       this.keys.add(e.code)
-      if (["Tab", "Space"].includes(e.code) || (this.locked && e.code.startsWith("Arrow"))) e.preventDefault()
+      if (["Tab", "Space"].includes(e.code) || (this.locked && (e.code.startsWith("Arrow") || Object.values(settings.keys).includes(e.code)))) e.preventDefault()
     })
     window.addEventListener("keyup", e => this.keys.delete(e.code))
     window.addEventListener("blur", () => {
@@ -71,6 +73,15 @@ export class Input {
 
   wasPressed(code) {
     return this.pressed.has(code)
+  }
+
+  // Rebindable actions (see core/settings.js).
+  action(name) {
+    return this.keys.has(settings.keys[name])
+  }
+
+  actionPressed(name) {
+    return this.pressed.has(settings.keys[name])
   }
 
   endFrame() {

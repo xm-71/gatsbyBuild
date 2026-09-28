@@ -1,3 +1,5 @@
+import { settings } from "../core/settings.js"
+
 // Tiny procedural sound effects + an ambient drone, all synthesized with WebAudio.
 export class Audio {
   constructor() {
@@ -14,6 +16,9 @@ export class Audio {
       this.master = this.ctx.createGain()
       this.master.gain.value = 0.5
       this.master.connect(this.ctx.destination)
+      this.sfx = this.ctx.createGain()
+      this.sfx.connect(this.master)
+      this.applyVolumes()
       this.startMusic()
     } catch {
       this.enabled = false
@@ -36,7 +41,7 @@ export class Audio {
     f.Q.value = q
     const g = ctx.createGain()
     g.gain.value = gain
-    src.connect(f).connect(g).connect(this.master)
+    src.connect(f).connect(g).connect(this.sfx)
     src.start()
   }
 
@@ -52,7 +57,7 @@ export class Audio {
     g.gain.setValueAtTime(0.0001, t0)
     g.gain.exponentialRampToValueAtTime(gain, t0 + 0.02)
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + duration)
-    o.connect(g).connect(this.master)
+    o.connect(g).connect(this.sfx)
     o.start(t0)
     o.stop(t0 + duration + 0.05)
   }
@@ -87,8 +92,8 @@ export class Audio {
   startMusic() {
     const ctx = this.ctx
     this.musicGain = ctx.createGain()
-    this.musicGain.gain.value = 0.05
     this.musicGain.connect(this.master)
+    this.applyVolumes()
     const chords = [
       [146.8, 220, 293.7],
       [130.8, 196, 261.6],
@@ -117,7 +122,9 @@ export class Audio {
     this.musicTimer = setInterval(playChord, 7000)
   }
 
-  setMusic(on) {
-    if (this.musicGain) this.musicGain.gain.value = on ? 0.05 : 0
+  // Volumes come from the settings menu (0..1 each).
+  applyVolumes() {
+    if (this.sfx) this.sfx.gain.value = settings.sfxVolume
+    if (this.musicGain) this.musicGain.gain.value = 0.1 * settings.musicVolume
   }
 }

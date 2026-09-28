@@ -8,6 +8,7 @@ import { describeItem } from "../logic/items.js"
 import { spellChance, buyPrice, sellPrice } from "../logic/combat.js"
 import { randomSeed } from "../core/rng.js"
 import { hideLoading } from "./loading.js"
+import { settings, updateSettings, bindKey, resetKeys, ACTIONS, keyLabel } from "../core/settings.js"
 import { readSave, describeSave } from "../game/save.js"
 import { PRESETS, qualityName, setQuality } from "../core/quality.js"
 import * as D from "../game/dialogue.js"
@@ -52,16 +53,36 @@ export class UI {
     this.messages = []
     this.buildHud()
     window.addEventListener("keydown", e => this.onKey(e))
+    // Recording a new key binding: grab the key before the game sees it.
+    window.addEventListener(
+      "keydown",
+      e => {
+        if (!this.captureKey) return
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        const action = this.captureKey
+        this.captureKey = null
+        if (e.code !== "Escape") {
+          const swapped = bindKey(action, e.code)
+          this.settingsNote = swapped ? `${keyLabel(e.code)} was used by “${ACTIONS.find(a => a[0] === swapped)[1]}”; the two keys were swapped.` : ""
+        }
+        this.settingsRender?.()
+      },
+      true
+    )
   }
 
   onKey(e) {
     if (!this.modal) return
     if (e.target instanceof HTMLInputElement) return
-    if (e.code === "Escape" || ((e.code === "Tab" || e.code === "KeyI") && this.modal === "menu") || (e.code === "KeyJ" && this.modal === "menu") || (e.code === "KeyM" && this.modal === "menu")) {
+    if (this.captureKey) return // a key binding is being recorded
+    const k = settings.keys
+    const menuKeys = [k.inventory, "KeyI", k.journal, k.map, k.character]
+    if (e.code === "Escape" || (menuKeys.includes(e.code) && this.modal === "menu")) {
       e.preventDefault()
       if (this.modal === "levelup") return
       this.closeModal()
-    } else if (e.code === "KeyE" && this.modal === "container") {
+    } else if (e.code === k.activate && this.modal === "container") {
       this.takeAll?.()
     }
   }
@@ -85,9 +106,9 @@ export class UI {
         <div class="panel title-panel">
           <label>World seed</label>
           <div class="row"><input id="seed" value="${esc(this.game.seed)}" spellcheck="false"><button data-act="reroll" title="Random seed">⟳</button></div>
-          <div class="row"><label>Graphics</label>${Object.entries(PRESETS).map(([k, p]) => `<button class="${k === qualityName ? "sel" : ""}" data-act="quality" data-arg="${k}">${p.name}</button>`).join("")}<span class="dim small-note">changing reloads the page</span></div>
           ${sv ? `<button class="big continue" data-act="continue">Continue</button><div class="dim small-note center">${esc(sv.name)} · level ${sv.level} ${esc(RACES[sv.race]?.name || sv.race)} ${esc(CLASSES[sv.cls]?.name || sv.cls)} · day ${sv.day} · seed ${esc(sv.seed)}</div>` : ""}
           <button class="big" data-act="new">New Run</button>
+          <button data-act="settings">Settings</button>
           ${sv ? `<div class="dim small-note center">Starting a new run ends your saved run.</div>` : ""}
           <details><summary>How to play</summary>
             <p>Create a character, then survive a freshly generated Vvardenfell. Talk to the Blades contact in your starting town to learn the main quest: recover Kagrenac's three tools from the strongholds that hold them, then descend into the Citadel under Red Mountain and slay the Dagoth lord. Death is permanent.</p>
@@ -123,6 +144,7 @@ export class UI {
         await this.game.prepareWorld(s)
         hideLoading()
       },
+      settings: () => this.openSettings(),
       continue: async () => {
         this.screen.classList.add("hidden")
         this.game.input.lock()
@@ -491,7 +513,7 @@ export class UI {
   }
 
   renderMenu() {
-    const tabs = ["inventory", "character", "magic", "map", "journal"]
+    const tabs = ["inventory", "character", "magic", "map", "journal", "settings"]
     this.win.innerHTML = `<div class="panel menu">
       <div class="tabs">${tabs.map(t => `<button class="tab ${t === this.menuTab ? "sel" : ""}" data-act="tab" data-arg="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}<button class="close" data-act="close">✕</button></div>
       <div class="menu-body"></div></div>`
@@ -618,6 +640,79 @@ export class UI {
     body.innerHTML = `<div class="journal"><div><h3>Active</h3>${q.filter(x => x.status !== "done").map(qrow).join("") || `<div class="dim">No active tasks. Talk to guildmasters about duties.</div>`}
       <h3>Completed</h3>${q.filter(x => x.status === "done").map(qrow).join("") || `<div class="dim">—</div>`}</div>
       <div><h3>Journal</h3>${[...g.journal].reverse().map(j => `<p><span class="dim">Day ${j.day}:</span> ${esc(j.text)}</p>`).join("")}</div></div>`
+  }
+
+  openSettings() {
+    this.openModal("settings")
+    this.win.innerHTML = `<div class="panel menu settings-win"><div class="tabs"><h2>Settings</h2><button class="close" data-act="close">✕</button></div><div class="menu-body"></div></div>`
+    bind(this.win.querySelector(".tabs"), { close: () => this.closeModal() })
+    this.render_settings(this.win.querySelector(".menu-body"))
+  }
+
+  render_settings(body) {
+    this.settingsRender = () => this.render_settings(body)
+    const s = settings
+    const inRun = this.game.mode === "play"
+    const range = (id, label, min, max, step, value, fmt) =>
+      `<label class="set-row" for="${id}"><span>${label}</span><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${value}"><output>${fmt(value)}</output></label>`
+    body.innerHTML = `<div class="settings">
+      <section><h3>Controls</h3>
+        ${range("set-sens", "Mouse sensitivity", 0.2, 3, 0.05, s.sensitivity, v => `${Number(v).toFixed(2)}×`)}
+        <label class="set-row" for="set-invert"><span>Invert mouse Y</span><input type="checkbox" id="set-invert" ${s.invertY ? "checked" : ""}></label>
+        ${range("set-fov", "Field of view", 55, 100, 1, s.fov, v => `${v}°`)}
+      </section>
+      <section><h3>Audio</h3>
+        ${range("set-music", "Music volume", 0, 1, 0.05, s.musicVolume, v => `${Math.round(v * 100)}%`)}
+        ${range("set-sfx", "Effects volume", 0, 1, 0.05, s.sfxVolume, v => `${Math.round(v * 100)}%`)}
+      </section>
+      <section><h3>Interface</h3>
+        <label class="set-row" for="set-compass"><span>Show compass with quest markers</span><input type="checkbox" id="set-compass" ${s.compass ? "checked" : ""}></label>
+      </section>
+      <section><h3>Graphics</h3>
+        <div class="row wrap">${Object.entries(PRESETS).map(([k, p]) => `<button class="${k === qualityName ? "sel" : ""}" data-act="quality" data-arg="${k}">${p.name}</button>`).join("")}</div>
+        <p class="dim small">Changing quality reloads the game${inRun ? ". Your run is saved and you can continue it from the title screen" : ""}.</p>
+      </section>
+      <section class="keys-sec"><h3>Keys</h3>
+        <div class="keylist">${ACTIONS.map(([id, label]) => `<div class="set-row"><span>${label}</span><button class="keybtn ${this.captureKey === id ? "sel" : ""}" data-act="bind" data-arg="${id}">${this.captureKey === id ? "Press a key…" : esc(keyLabel(s.keys[id]))}</button></div>`).join("")}</div>
+        <p class="dim small">${esc(this.settingsNote || "Click a key, then press the new key. Escape cancels. Arrow keys also move; 1–9 are quick-slots.")}</p>
+        <button data-act="resetkeys">Reset keys</button>
+      </section>
+    </div>`
+    const hook = (id, key, parse = Number) =>
+      body.querySelector("#" + id).addEventListener("input", e => {
+        updateSettings({ [key]: parse(e.target.value) })
+        const out = e.target.parentElement.querySelector("output")
+        if (out) out.textContent = { sensitivity: v => `${v.toFixed(2)}×`, fov: v => `${v}°`, musicVolume: v => `${Math.round(v * 100)}%`, sfxVolume: v => `${Math.round(v * 100)}%` }[key](settings[key])
+      })
+    hook("set-sens", "sensitivity")
+    hook("set-fov", "fov")
+    hook("set-music", "musicVolume")
+    hook("set-sfx", "sfxVolume")
+    body.querySelector("#set-invert").addEventListener("change", e => updateSettings({ invertY: e.target.checked }))
+    body.querySelector("#set-compass").addEventListener("change", e => updateSettings({ compass: e.target.checked }))
+    bind(body, {
+      bind: id => {
+        this.captureKey = id
+        this.settingsNote = ""
+        this.render_settings(body)
+      },
+      resetkeys: () => {
+        resetKeys()
+        this.settingsNote = "Keys reset to the defaults."
+        this.render_settings(body)
+      },
+      quality: q => {
+        if (q === qualityName) return
+        this.game.autosave()
+        setQuality(q)
+        try {
+          sessionStorage.setItem("ashfall-seed", this.game.seed)
+        } catch {
+          /* ignore */
+        }
+        location.reload()
+      },
+    })
   }
 
   // ---------------- dialogue ----------------
