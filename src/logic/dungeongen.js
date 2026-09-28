@@ -232,10 +232,12 @@ export function generateDungeonLevel({ seed, type, tier, level, levels, bossLeve
 
   const props = []
   const propTypes = PROPS[type]
+  const reserved = [entry, goal, ...chests]
   for (const r of rooms) {
     const n = rng.int(1, 4)
     for (let i = 0; i < n; i++) {
       const p = randomFloorIn(rng, grid, w, r)
+      if (reserved.some(q => Math.abs(q.x - p.x) <= 1 && Math.abs(q.y - p.y) <= 1)) continue
       props.push({ ...p, type: rng.pick(propTypes), rot: rng.range(0, Math.PI * 2), ox: rng.range(-1.2, 1.2), oz: rng.range(-1.2, 1.2) })
     }
   }

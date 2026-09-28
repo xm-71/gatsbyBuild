@@ -207,7 +207,7 @@ export function buildStairs(down, look) {
   portal.position.y = 1.5
   g.add(portal)
   if (!down) {
-    const l = new THREE.PointLight(0xfff0c0, 6, 10, 1.5)
+    const l = new THREE.PointLight(0xfff0c0, 3, 8, 1.8)
     l.position.set(0, 2, 0.8)
     g.add(l)
   }

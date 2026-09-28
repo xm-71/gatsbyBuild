@@ -210,6 +210,8 @@ export class DungeonArea {
       this.scene.add(this.downStairs)
       this.downPos = this.cellCenter(lvl.stairsDown.x, lvl.stairsDown.y)
     }
+    const SOLID = { pipe: 0.4, fleshpillar: 0.9, statue: 0.6, stalagmite: 0.5, coffin: 0.8, altar: 1.0, crate: 0.6, barrel: 0.5, brazier: 0.5, urn: 0.45 }
+    this.propColliders = lvl.props.filter(p => SOLID[p.type]).map(p => ({ x: p.x * CELL + CELL / 2 + p.ox, z: p.y * CELL + CELL / 2 + p.oz, r: SOLID[p.type] }))
     this.explored = state.explored || (state.explored = new Uint8Array(lvl.w * lvl.h))
   }
 
@@ -269,6 +271,15 @@ export class DungeonArea {
             pos.z = c.z
           }
         }
+      }
+    }
+    for (const pr of this.propColliders) {
+      const dx = pos.x - pr.x
+      const dz = pos.z - pr.z
+      const d = Math.hypot(dx, dz)
+      if (d < r + pr.r && d > 1e-6) {
+        pos.x = pr.x + (dx / d) * (r + pr.r)
+        pos.z = pr.z + (dz / d) * (r + pr.r)
       }
     }
     for (const ch of this.chests) {

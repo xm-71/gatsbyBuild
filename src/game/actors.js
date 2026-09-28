@@ -23,7 +23,7 @@ export class Enemy {
     this.boss = !!opts.boss
     const tierScale = 1 + 0.08 * Math.max(0, (opts.tier || 1) - 1)
     this.level = base.level + (this.boss ? 3 : 0)
-    this.maxHp = Math.round(base.hp * tierScale * (this.boss ? 2.6 : 1))
+    this.maxHp = Math.round(base.hp * tierScale * (this.boss ? (base.boss ? 1.3 : 2.6) : 1))
     this.hp = this.maxHp
     this.dmg = base.dmg.map(v => Math.round(v * 1.25 * (this.boss ? 1.35 : 1) * (0.9 + tierScale * 0.1)))
     this.ar = base.ar + (this.boss ? 10 : 0)
