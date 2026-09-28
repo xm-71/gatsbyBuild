@@ -1,6 +1,6 @@
 import * as THREE from "three"
-import { RNG, randomSeed } from "../core/rng.js"
-import { generateWorld, relicDescription, SEA_LEVEL, REGIONS } from "../logic/worldgen.js"
+import { RNG } from "../core/rng.js"
+import { relicDescription, SEA_LEVEL, REGIONS } from "../logic/worldgen.js"
 import { generateDungeonLevel, DUNGEON_THEMES } from "../logic/dungeongen.js"
 import { createCharacter, getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, armorRating, resistance, exerciseSkill, addItem, hasEffect, effectAmount, tickEffects, equip, removeItem, fatigueRatio } from "../logic/character.js"
 import { applyArmor, blockChance, evasionOf } from "../logic/combat.js"
@@ -16,6 +16,9 @@ import { Audio } from "./audio.js"
 import { ViewModel } from "../render/viewmodel.js"
 import { updatePlayer, spellEffectsOnEnemy } from "./player.js"
 import { UI } from "../ui/ui.js"
+import { loadWorld } from "./worldLoader.js"
+import { writeSave, deleteSave, restoreRun } from "./save.js"
+import { showLoading, hideLoading } from "../ui/loading.js"
 import { Q } from "../core/quality.js"
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
 
@@ -51,20 +54,13 @@ export class Game {
     this.daylight = 1
     this.titleT = 0
     window.addEventListener("resize", () => this.resize())
+    document.addEventListener("visibilitychange", () => document.hidden && this.autosave())
+    window.addEventListener("pagehide", () => this.autosave())
     this.renderer.domElement.addEventListener("click", () => {
       this.audio.ensure()
       if (this.mode === "play" && !this.ui.modal) this.input.lock()
     })
     this.renderer.setAnimationLoop(() => this.frame())
-    let seed = randomSeed()
-    try {
-      seed = sessionStorage.getItem("ashfall-seed") || seed
-      sessionStorage.removeItem("ashfall-seed")
-    } catch {
-      /* storage unavailable */
-    }
-    this.prepareWorld(seed)
-    this.ui.showTitle()
   }
 
   resize() {
@@ -74,24 +70,102 @@ export class Game {
   }
 
   // Generate (or reuse) a world for the given seed. The title screen flies over it.
-  prepareWorld(seed) {
-    if (this.world && this.world.seed === seed) return
+  // The island is generated in a worker and the 3D world built in steps, so the
+  // page keeps painting a progress bar instead of freezing.
+  async prepareWorld(seed, onProgress = (p, text) => showLoading(text, p), force = false) {
+    if (!force && this.world && this.world.seed === seed && this.overworld) return
+    this.loadingWorld = true
+    const token = (this.worldToken = (this.worldToken || 0) + 1)
+    onProgress(0, "Raising Vvardenfell from the sea…")
+    const { world, chunks } = await loadWorld(seed, () => onProgress(0.15, "Shaping the land…"))
+    if (token !== this.worldToken) return // a newer seed was requested meanwhile
+    const overworld = await OverworldArea.create(this, world, chunks, (p, text) => onProgress(0.25 + p * 0.65, text ? `${text}…` : "Lighting the lanterns…"))
+    if (token !== this.worldToken) return
     if (this.overworld) this.overworld.scene.clear()
     this.seed = seed
-    this.world = generateWorld(seed)
-    this.overworld = new OverworldArea(this, this.world)
+    this.world = world
+    this.overworld = overworld
     this.setArea(this.overworld)
     this.projectiles = []
+    onProgress(0.92, "Lighting the lanterns…")
+    try {
+      await Promise.race([this.renderer.compileAsync(this.overworld.scene, this.camera), new Promise(r => setTimeout(r, 8000))])
+    } catch {
+      /* shaders compile on first draw instead */
+    }
+    this.loadingWorld = false
+    onProgress(1, "")
   }
 
-  startRun({ name, race, cls, sign, seed }) {
-    this.audio.ensure()
+  async ensureWorld(seed) {
     if (seed !== this.seed || this.runStarted) {
-      this.world = null
-      this.prepareWorld(seed)
+      // a finished run mutated its world, so regenerate even for the same seed
+      await this.prepareWorld(seed, undefined, true)
+      hideLoading()
     }
     this.runStarted = true
     this.rng = new RNG(`run:${seed}`)
+  }
+
+  newPlayerController(x, y, z, yaw) {
+    return {
+      pos: new THREE.Vector3(x, y, z),
+      vel: new THREE.Vector3(),
+      yaw,
+      pitch: 0,
+      onGround: true,
+      sneaking: false,
+      swimming: false,
+      charging: false,
+      chargeT: 0,
+      attackCd: 0,
+      pendingHit: null,
+      castCd: 0,
+      stepT: 0,
+      hurtFlash: 0,
+    }
+  }
+
+  beginPlay() {
+    this.lastTarget = null
+    this.lastTargetT = 0
+    this.saveT = 0
+    this.mode = "play"
+    this.ui.hideScreens()
+    this.ui.showHud()
+  }
+
+  // Continue a suspended run from its save.
+  async resumeRun(save) {
+    this.audio.ensure()
+    await this.ensureWorld(save.seed)
+    restoreRun(this, save)
+    this.viewmodel.setSkin(RACES[this.char.race].skin)
+    this.pc = this.newPlayerController(save.pc.x, save.pc.y, save.pc.z, save.pc.yaw)
+    this.pc.pitch = save.pc.pitch || 0
+    this.pc.sneaking = !!save.pc.sneaking
+    this.setArea(this.overworld)
+    if (save.area.kind === "dungeon") {
+      const d = this.world.dungeons[save.area.id]
+      this.returnPos = save.area.returnPos
+      this.loadDungeonLevel(d, save.area.level, false, true)
+      this.pc.pos.set(save.pc.x, save.pc.y, save.pc.z)
+    }
+    this.beginPlay()
+    this.msg(`Welcome back, ${this.char.name}. Day ${Math.floor(this.time / 24) + 1}.`, "#f0d890")
+  }
+
+  // Write the suspend save (only while a run is in progress).
+  autosave() {
+    if (this.mode !== "play" || !this.char || this.char.dead) return
+    this.saveT = 0
+    writeSave(this)
+  }
+
+  async startRun({ name, race, cls, sign, seed }) {
+    this.audio.ensure()
+    await this.ensureWorld(seed)
+    deleteSave()
     this.char = createCharacter({ name, race, cls, sign })
     this.char.dead = false
     this.viewmodel.setSkin(RACES[race].skin)
@@ -107,35 +181,17 @@ export class Game {
     this.trainedThisLevel = 0
     this.merchantStock = new Map()
     this.dispositionMod = new Map()
-    this.lastTarget = null
-    this.lastTargetT = 0
     const t = this.world.startTown
     const a = t.port.angle
-    this.pc = {
-      pos: new THREE.Vector3(t.x + Math.cos(a) * (t.radius * 0.45), t.y, t.z + Math.sin(a) * (t.radius * 0.45)),
-      vel: new THREE.Vector3(),
-      yaw: Math.atan2(Math.cos(a), Math.sin(a)),
-      pitch: 0,
-      onGround: true,
-      sneaking: false,
-      swimming: false,
-      charging: false,
-      chargeT: 0,
-      attackCd: 0,
-      pendingHit: null,
-      castCd: 0,
-      stepT: 0,
-      hurtFlash: 0,
-    }
+    this.pc = this.newPlayerController(t.x + Math.cos(a) * (t.radius * 0.45), t.y, t.z + Math.sin(a) * (t.radius * 0.45), Math.atan2(Math.cos(a), Math.sin(a)))
     this.setArea(this.overworld)
-    this.mode = "play"
-    this.ui.hideScreens()
-    this.ui.showHud()
+    this.beginPlay()
     const blade = t.npcs.find(n => n.role === "blade")
     this.addJournal(`I have arrived in ${t.name} in the ${REGIONS[t.region].name} of Vvardenfell, a free ${RACES[race].name}. ${blade ? `An Imperial named ${blade.name} of the Blades wishes to speak with me in the town square.` : ""}`)
     this.msg(`Welcome to ${t.name}, outlander. Seed: ${seed}`, "#f0d890")
     this.msg("Click to look around. WASD move · LMB attack · F cast · E activate · Tab menu", "#c9b88f")
     if (blade) this.msg(`${blade.name} of the Blades is waiting to speak with you.`, "#c9b88f")
+    this.autosave()
   }
 
   setArea(area) {
@@ -191,6 +247,7 @@ export class Game {
 
   frame() {
     this.timer.update()
+    if (!this.overworld || !this.area || !this.world) return
     const dt = Math.min(0.05, this.timer.getDelta())
     if (this.mode === "title" || this.mode === "chargen") this.updateTitle(dt)
     else if (this.mode === "play") {
@@ -267,6 +324,8 @@ export class Game {
     this.playerLight.intensity = hasEffect(c, "light") ? 60 : this.area.kind === "dungeon" ? 22 : RACES[c.race].nightEye && this.isNight() ? 12 : 0
     this.playerLight.distance = hasEffect(c, "light") ? 34 : 16
     this.lastTargetT -= dt
+    this.saveT = (this.saveT || 0) + dt
+    if (this.saveT > 20) this.autosave()
     this.pc.hurtFlash = Math.max(0, this.pc.hurtFlash - dt * 2)
   }
 
@@ -368,6 +427,7 @@ export class Game {
     this.input.unlock()
     this.audio.play("death")
     this.deathCause = source ? `slain by ${source.name}` : "succumbed to their wounds"
+    deleteSave()
     this.recordRun(false)
     setTimeout(() => this.ui.showDeath(), 1600)
   }
@@ -542,6 +602,7 @@ export class Game {
     this.input.unlock()
     this.audio.play("levelup")
     this.addJournal(`${this.world.mainQuest.dagoth} is dead and the Heart of Lorkhan is severed. The Blight will lift from Vvardenfell.`)
+    deleteSave()
     this.recordRun(true)
     this.ui.showVictory()
   }
@@ -586,7 +647,7 @@ export class Game {
     this.loadDungeonLevel(d, 0, false)
   }
 
-  loadDungeonLevel(d, level, fromBelow) {
+  loadDungeonLevel(d, level, fromBelow, quiet = false) {
     const st = (this.dungeonState[d.id] ||= { levels: {} })
     const lst = (st.levels[level] ||= { dead: new Set(), chests: {} })
     const lvl = generateDungeonLevel({ seed: d.seed, type: d.type, tier: d.tier, level, levels: d.levels, relic: d.relic, citadel: !!d.citadel })
@@ -598,8 +659,10 @@ export class Game {
     this.pc.pos.copy(p)
     this.pc.vel.set(0, 0, 0)
     this.char.stats.deepest = Math.max(this.char.stats.deepest, level + 1)
+    if (quiet) return
     this.audio.play("door")
     this.msg(`${d.name} — level ${level + 1} of ${d.levels}`, "#c9b88f")
+    this.autosave()
   }
 
   exitDungeon() {
@@ -610,6 +673,7 @@ export class Game {
     this.pc.yaw = r.yaw
     this.pc.vel.set(0, 0, 0)
     this.audio.play("door")
+    this.autosave()
   }
 
   teleportToTown(town) {

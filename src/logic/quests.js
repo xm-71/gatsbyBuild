@@ -4,6 +4,10 @@ import { artifactName } from "./names.js"
 
 let questCounter = 1
 
+export function reserveQuestIds(maxUsed) {
+  questCounter = Math.max(questCounter, maxUsed + 1)
+}
+
 const REGION_CREATURES = ["nixHound", "kagouti", "alit", "cliffRacer", "mudcrab", "netch", "scamp", "ashZombie", "guar", "clannfear"]
 
 // Build a faction (or freelance) quest appropriate to the player's level.

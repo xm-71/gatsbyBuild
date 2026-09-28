@@ -12,10 +12,12 @@ import { CELL, FLOOR, bfsDistances } from "../logic/dungeongen.js"
 import { creaturesFor } from "../data/creatures.js"
 
 export class OverworldArea {
-  constructor(game, world) {
+  // Build synchronously (tests, fallback). Prefer OverworldArea.create for the game.
+  constructor(game, world, chunks = null, deferred = false) {
     this.kind = "overworld"
     this.game = game
     this.world = world
+    this.chunks = chunks
     this.scene = new THREE.Scene()
     this.scene.fog = new THREE.Fog(0x9aa0a0, 40, 300)
     this.scene.background = new THREE.Color(0x9aa0a0)
@@ -25,28 +27,77 @@ export class OverworldArea {
     this.corpses = []
     this.sacks = []
     this.spawnTimer = 0
-
-    const terrain = buildTerrain(world)
-    this.terrain = terrain
-    this.scene.add(terrain.mesh, terrain.water)
-    this.water = terrain.water
-    this.scene.add(buildFlora(world, this.colliders))
-    this.grass = new GrassField(world, world.towns)
-    this.scene.add(this.grass.mesh)
     this.clockT = 0
-    this.sky = new Sky(this.scene)
+    this.towns = []
+    this.entrances = []
+    if (!deferred) for (const _ of this.buildSteps()) void _
+  }
 
-    this.towns = world.towns.map(t => {
-      const built = buildTown(t, this.colliders)
-      this.scene.add(built.group)
-      for (const spec of t.npcs) this.npcs.push(new Npc(game, this, spec, world.heightAt(spec.x, spec.z)))
-      return { town: t, ...built }
+  // Build the overworld step by step, letting the page repaint between steps.
+  static async create(game, world, chunks, onProgress = () => {}) {
+    const area = new OverworldArea(game, world, chunks, true)
+    const steps = [...area.stepList()]
+    for (let i = 0; i < steps.length; i++) {
+      onProgress(i / steps.length, steps[i].label)
+      await new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)))
+      const t0 = performance.now()
+      steps[i].run()
+      area.buildTimes = area.buildTimes || []
+      area.buildTimes.push([steps[i].label, Math.round(performance.now() - t0)])
+    }
+    onProgress(1, "")
+    return area
+  }
+
+  *buildSteps() {
+    for (const step of this.stepList()) yield step.run()
+  }
+
+  stepList() {
+    const game = this.game
+    const world = this.world
+    const steps = []
+    steps.push({
+      label: "Shaping the land",
+      run: () => {
+        const terrain = this.chunks ? buildTerrain(world, this.chunks) : buildTerrain(world)
+        this.chunks = null
+        this.terrain = terrain
+        this.scene.add(terrain.mesh, terrain.water)
+        this.water = terrain.water
+      },
     })
-    this.entrances = world.dungeons.map(d => {
-      const e = buildEntrance(d, this.colliders)
-      this.scene.add(e.group)
-      return { dungeon: d, ...e }
+    steps.push({
+      label: "Growing emperor parasols",
+      run: () => {
+        this.scene.add(buildFlora(world, this.colliders))
+        this.grass = new GrassField(world, world.towns)
+        this.scene.add(this.grass.mesh)
+        this.sky = new Sky(this.scene)
+      },
     })
+    for (const t of world.towns) {
+      steps.push({
+        label: `Building ${t.name}`,
+        run: () => {
+          const built = buildTown(t, this.colliders)
+          this.scene.add(built.group)
+          for (const spec of t.npcs) this.npcs.push(new Npc(game, this, spec, world.heightAt(spec.x, spec.z)))
+          this.towns.push({ town: t, ...built })
+        },
+      })
+    }
+    steps.push({
+      label: "Sealing ancient tombs",
+      run: () => {
+        this.entrances = world.dungeons.map(d => {
+          const e = buildEntrance(d, this.colliders)
+          this.scene.add(e.group)
+          return { dungeon: d, ...e }
+        })
+      },
+    })
+    return steps
   }
 
   groundHeight(x, z) {

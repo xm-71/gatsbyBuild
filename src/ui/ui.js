@@ -7,6 +7,8 @@ import { createCharacter, getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, 
 import { describeItem } from "../logic/items.js"
 import { spellChance, buyPrice, sellPrice } from "../logic/combat.js"
 import { randomSeed } from "../core/rng.js"
+import { hideLoading } from "./loading.js"
+import { readSave, describeSave } from "../game/save.js"
 import { PRESETS, qualityName, setQuality } from "../core/quality.js"
 import * as D from "../game/dialogue.js"
 import { usePotion, eatItem, doRest } from "../game/player.js"
@@ -74,6 +76,8 @@ export class UI {
   showTitle() {
     this.game.mode = "title"
     const runs = this.game.pastRuns()
+    const save = readSave()
+    const sv = save && describeSave(save)
     this.screen.classList.remove("hidden")
     this.screen.innerHTML = `
       <div class="title-wrap">
@@ -82,7 +86,9 @@ export class UI {
           <label>World seed</label>
           <div class="row"><input id="seed" value="${esc(this.game.seed)}" spellcheck="false"><button data-act="reroll" title="Random seed">⟳</button></div>
           <div class="row"><label>Graphics</label>${Object.entries(PRESETS).map(([k, p]) => `<button class="${k === qualityName ? "sel" : ""}" data-act="quality" data-arg="${k}">${p.name}</button>`).join("")}<span class="dim small-note">changing reloads the page</span></div>
+          ${sv ? `<button class="big continue" data-act="continue">Continue</button><div class="dim small-note center">${esc(sv.name)} · level ${sv.level} ${esc(RACES[sv.race]?.name || sv.race)} ${esc(CLASSES[sv.cls]?.name || sv.cls)} · day ${sv.day} · seed ${esc(sv.seed)}</div>` : ""}
           <button class="big" data-act="new">New Run</button>
+          ${sv ? `<div class="dim small-note center">Starting a new run ends your saved run.</div>` : ""}
           <details><summary>How to play</summary>
             <p>Create a character, then survive a freshly generated Vvardenfell. Talk to the Blades contact in your starting town to learn the main quest: recover Kagrenac's three tools from the strongholds that hold them, then descend into the Citadel under Red Mountain and slay the Dagoth lord. Death is permanent.</p>
             <p>Skills improve as you use them. Every ten increases in major or minor skills lets you level up when you rest. Join guilds and Great Houses, take their duties, and rise through the ranks.</p>
@@ -111,14 +117,21 @@ export class UI {
         }
         location.reload()
       },
-      reroll: () => {
+      reroll: async () => {
         const s = randomSeed()
         this.screen.querySelector("#seed").value = s
-        this.game.prepareWorld(s)
+        await this.game.prepareWorld(s)
+        hideLoading()
       },
-      new: () => {
+      continue: async () => {
+        this.screen.classList.add("hidden")
+        this.game.input.lock()
+        await this.game.resumeRun(save)
+      },
+      new: async () => {
         const s = this.screen.querySelector("#seed").value.trim() || randomSeed()
-        this.game.prepareWorld(s)
+        await this.game.prepareWorld(s)
+        hideLoading()
         this.showChargen(s)
       },
     })
@@ -159,9 +172,9 @@ export class UI {
         cls: v => ((state.cls = v), render()),
         sign: v => ((state.sign = v), render()),
         back: () => this.showTitle(),
-        go: () => {
-          this.game.startRun({ name: state.name.trim() || "Outlander", race: state.race, cls: state.cls, sign: state.sign, seed })
+        go: async () => {
           this.game.input.lock()
+          await this.game.startRun({ name: state.name.trim() || "Outlander", race: state.race, cls: state.cls, sign: state.sign, seed })
         },
       })
     }
@@ -464,6 +477,7 @@ export class UI {
     this.win.classList.add("hidden")
     this.win.innerHTML = ""
     this.game.input.pressed.clear()
+    this.game.autosave?.()
     if (!silent && this.game.mode === "play") this.game.input.lock()
   }
 

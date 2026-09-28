@@ -4,6 +4,11 @@ import { SKILLS } from "../data/stats.js"
 let uid = 1
 const nextUid = () => uid++
 
+// After loading a save, keep new item ids clear of the restored ones.
+export function reserveItemUids(maxUsed) {
+  uid = Math.max(uid, maxUsed + 1)
+}
+
 const titleCase = s => s.replace(/\b\w/g, c => c.toUpperCase())
 
 export function makeWeapon(material, base, enchant = null) {

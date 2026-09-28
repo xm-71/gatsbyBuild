@@ -13,7 +13,13 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--text); font-family: "IM Fell English", Georgia, serif; }
 canvas { display: block; }
-#loading { position: fixed; inset: 0; display: grid; place-items: center; font-size: 28px; color: var(--head); background: #0a0806; z-index: 50; }
+#loading { position: fixed; inset: 0; display: grid; place-items: center; background: #0a0806; z-index: 50; padding: 16px; }
+#loading[hidden] { display: none; }
+.load-box { width: min(420px, 100%); display: flex; flex-direction: column; gap: 12px; text-align: center; }
+.load-title { font-family: Cinzel, Georgia, serif; font-size: 40px; letter-spacing: 0.2em; color: #f0d890; }
+.load-label { color: var(--text); font-size: 17px; min-height: 1.4em; }
+.load-bar { height: 8px; border: 1px solid var(--border); background: #1a140c; }
+.load-fill { height: 100%; width: 0; background: linear-gradient(90deg, #7a5a20, #d8b050); transition: width 0.2s; }
 .hidden { display: none !important; }
 button { font: inherit; color: var(--head); background: linear-gradient(#2a2014, #17110a); border: 1px solid var(--border); padding: 5px 12px; cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--border-hi); color: #fff4c8; }
@@ -146,3 +152,6 @@ hr { border: none; border-top: 1px solid var(--border); width: 100%; }
 }
 
 .small-note { font-size: 12px; margin-left: 6px; }
+
+.center { text-align: center; }
+.continue { background: linear-gradient(#5a4420, #3a2a12); color: #fff4c8; border-color: var(--border-hi); }
