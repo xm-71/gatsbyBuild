@@ -4,7 +4,8 @@ import { getSpell } from "../data/spells.js"
 import { REGIONS, SEA_LEVEL } from "../logic/worldgen.js"
 import { CELL } from "../logic/dungeongen.js"
 import { slotForItem, assignQuickslot, itemForSlot, createCharacter, getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, armorRating, encumbrance, carryCapacity, equip, unequip, isEquipped, skillType, skillRequirement, canLevelUp, levelUp, attrMultiplier, fatigueRatio, addItem } from "../logic/character.js"
-import { describeItem } from "../logic/items.js"
+import { describeItem, isBroken, hasCondition, conditionRatio } from "../logic/items.js"
+import { coatingText } from "../game/combat.js"
 import { spellChance, buyPrice, sellPrice } from "../logic/combat.js"
 import { randomSeed } from "../core/rng.js"
 import { hideLoading } from "./loading.js"
@@ -14,7 +15,15 @@ import { questTargets, nearbyPlaces } from "../game/markers.js"
 import { CELL as DCELL } from "../logic/dungeongen.js"
 import { PRESETS, qualityName, setQuality } from "../core/quality.js"
 import * as D from "../game/dialogue.js"
-import { usePotion, eatItem, doRest } from "../game/player.js"
+import { usePotion, eatItem, doRest, coatWeapon, useRepairTool } from "../game/player.js"
+
+// A thin condition bar under worn weapons and armour.
+function condBar(i) {
+  if (!hasCondition(i)) return ""
+  const r = conditionRatio(i)
+  if (r >= 0.999) return ""
+  return `<span class="condbar"><span style="width:${Math.round(r * 100)}%;background:${r > 0.5 ? "#7a9a50" : r > 0.2 ? "#c0a040" : "#b04030"}"></span></span>`
+}
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c])
 const pct = (a, b) => `${Math.max(0, Math.min(100, (a / Math.max(1, b)) * 100))}%`
@@ -642,27 +651,38 @@ export class UI {
     const g = this.game
     const c = g.char
     const filter = this.invFilter || "all"
-    const kinds = { all: () => true, weapons: i => i.kind === "weapon" || i.kind === "ammo", apparel: i => i.kind === "armor", magic: i => i.kind === "potion", misc: i => ["misc", "lockpick", "quest"].includes(i.kind) }
+    const kinds = { all: () => true, weapons: i => i.kind === "weapon" || i.kind === "ammo", apparel: i => i.kind === "armor", magic: i => i.kind === "potion" || i.kind === "poison", misc: i => ["misc", "lockpick", "quest", "repair"].includes(i.kind) }
     const items = c.inventory.filter(kinds[filter])
     const sel = this.selectedItem && c.inventory.includes(this.selectedItem) ? this.selectedItem : null
     const eq = Object.entries(c.equipment)
     body.innerHTML = `<div class="inv">
       <div class="inv-list">
         <div class="filters">${Object.keys(kinds).map(k => `<button class="${k === filter ? "sel" : ""}" data-act="filter" data-arg="${k}">${k}</button>`).join("")}</div>
-        <div class="list">${items.map((i, idx) => `<div class="item ${isEquipped(c, i) ? "eq" : ""} ${i === sel ? "sel" : ""}" data-act="select" data-arg="${c.inventory.indexOf(i)}"><span>${esc(i.name)}${i.qty > 1 ? ` (${i.qty})` : ""}</span><span class="dim">${i.relic ? "relic" : i.value}</span></div>`).join("") || `<div class="dim">Nothing here.</div>`}</div>
+        <div class="list">${items.map((i, idx) => `<div class="item ${isEquipped(c, i) ? "eq" : ""} ${i === sel ? "sel" : ""} ${isBroken(i) ? "broken" : ""}" data-act="select" data-arg="${c.inventory.indexOf(i)}"><span>${esc(i.name)}${i.qty > 1 ? ` (${i.qty})` : ""}${condBar(i)}</span><span class="dim">${i.relic ? "relic" : i.artifact ? "artifact" : i.value}</span></div>`).join("") || `<div class="dim">Nothing here.</div>`}</div>
       </div>
       <div class="inv-side">
         <div class="kv"><span>Gold</span><b>${c.gold}</b></div>
         <div class="kv"><span>Armor Rating</span><b>${armorRating(c)}</b></div>
         <div class="kv"><span>Encumbrance</span><b class="${encumbrance(c) > carryCapacity(c) ? "red" : ""}">${Math.round(encumbrance(c))}/${carryCapacity(c)}</b></div>
         <h3>Equipped</h3>${eq.map(([s, i]) => `<div class="kv small"><span>${s}</span><span>${esc(i.name)}</span></div>`).join("") || `<div class="dim">nothing</div>`}
+        ${c.coating ? `<div class="coating small">☠ ${esc(coatingText(c))}</div>` : ""}
         ${sel ? `<div class="detail"><h3>${esc(sel.name)}</h3>${describeItem(sel).map(l => `<div>${esc(l)}</div>`).join("")}
           <div class="row">${this.itemActions(sel)}</div></div>` : `<p class="dim">Select an item.</p>`}
       </div></div>`
     bind(body, {
       filter: k => ((this.invFilter = k), this.render_inventory(body)),
       select: i => ((this.selectedItem = c.inventory[Number(i)]), this.render_inventory(body)),
-      equip: () => (equip(c, sel), this.render_inventory(body)),
+      equip: () => {
+        if (isBroken(sel)) g.msg(`${sel.name} is broken. Repair it first.`, "#ff9a7a")
+        else equip(c, sel)
+        this.render_inventory(body)
+      },
+      coat: () => (coatWeapon(g, sel), this.render_inventory(body)),
+      repair: k => {
+        useRepairTool(g, sel, c.inventory[Number(k)])
+        if (!c.inventory.includes(sel)) this.selectedItem = null
+        this.render_inventory(body)
+      },
       unequip: () => (unequip(c, sel), this.render_inventory(body)),
       drink: () => (usePotion(g, sel), this.render_inventory(body)),
       eat: () => (eatItem(g, sel), this.render_inventory(body)),
@@ -676,9 +696,14 @@ export class UI {
     const a = []
     if (i.kind === "weapon" || i.kind === "armor" || i.kind === "ammo") a.push(isEquipped(c, i) ? `<button data-act="unequip">Unequip</button>` : `<button data-act="equip">Equip</button>`)
     if (i.kind === "potion") a.push(`<button data-act="drink">Drink</button>`)
+    if (i.kind === "poison") a.push(`<button data-act="coat" ${c.equipment.weapon ? "" : "disabled"}>Coat weapon</button>`)
+    if (i.kind === "repair") {
+      const worn = c.inventory.filter(x => hasCondition(x) && x.cond < x.maxCond)
+      a.push(`<div class="repairlist"><div class="dim small">Repair with Armorer ${getSkill(c, "armorer")}:</div>${worn.map(x => `<button data-act="repair" data-arg="${c.inventory.indexOf(x)}">${esc(x.name)} <span class="dim">${Math.ceil(x.cond)}/${x.maxCond}</span></button>`).join("") || `<div class="dim small">Nothing needs repair.</div>`}</div>`)
+    }
     if (i.eat) a.push(`<button data-act="eat">Eat</button>`)
     if (i.kind !== "quest" && !i.relic && !i.bound) a.push(`<button data-act="drop">Drop</button>`)
-    if (["weapon", "armor", "ammo", "potion"].includes(i.kind) || i.eat) a.push(this.slotPicker(slotForItem(i)))
+    if (["weapon", "armor", "ammo", "potion", "poison"].includes(i.kind) || i.eat) a.push(this.slotPicker(slotForItem(i)))
     return a.join("")
   }
 
@@ -938,6 +963,28 @@ export class UI {
         const offers = D.trainingOffers(g, npc)
         main.innerHTML = `<h3>Training</h3><p class="dim">Up to 5 sessions per level (${g.trainedThisLevel}/5 used).</p><div class="list">${offers.map((o, k) => `<div class="item" data-act="train" data-arg="${k}"><span>${SKILLS[o.skill].name} <span class="dim">${getSkill(c, o.skill)} → max ${o.cap}</span></span><span class="gold">${o.price}</span></div>`).join("")}</div>${back}`
         bind(main, { train: k => say(D.train(g, offers[Number(k)])), back: () => say() })
+        return
+      }
+      case "repair": {
+        const ctx = D.priceContext(g, npc)
+        const worn = c.inventory.filter(i => hasCondition(i) && i.cond < i.maxCond)
+        main.innerHTML = `<h3>Repair</h3><div class="list">${worn.map(i => `<div class="item" data-act="fix" data-arg="${c.inventory.indexOf(i)}"><span>${esc(i.name)} <span class="dim">${Math.ceil(i.cond)}/${i.maxCond}${isBroken(i) ? " — broken" : ""}</span></span><span class="gold">${D.repairPrice(g, npc, i)}</span></div>`).join("") || `<div class="dim">Your gear is in good order.</div>`}</div>${worn.length > 1 ? `<div class="row"><button data-act="fixall">Repair everything (${worn.reduce((a, i) => a + D.repairPrice(g, npc, i), 0)})</button></div>` : ""}<p class="dim barter-msg"></p>${back}`
+        void ctx
+        const note = r => r && (main.querySelector(".barter-msg").textContent = r)
+        bind(main, {
+          fix: k => {
+            const r = D.repair(g, npc, c.inventory[Number(k)])
+            this.renderDialogueMain(main)
+            note(r)
+          },
+          fixall: () => {
+            let r = ""
+            for (const i of worn) r = D.repair(g, npc, i) || r
+            this.renderDialogueMain(main)
+            note(r)
+          },
+          back: () => say(),
+        })
         return
       }
       case "healing":

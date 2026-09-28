@@ -1,7 +1,7 @@
 import * as THREE from "three"
 import { SEA_LEVEL } from "../logic/worldgen.js"
 import { settings } from "../core/settings.js"
-import { getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, fatigueRatio, moveSpeed, jumpVelocity, encumbrance, addEffect, addItem, equip, removeItem, canLevelUp, itemForSlot } from "../logic/character.js"
+import { getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, fatigueRatio, moveSpeed, jumpVelocity, encumbrance, addEffect, addItem, equip, removeItem, canLevelUp, itemForSlot, equippedUnique } from "../logic/character.js"
 import { hitChance, meleeDamage, spellChance, lockpickChance } from "../logic/combat.js"
 import { makeItemFromSpec } from "../logic/items.js"
 import { getSpell } from "../data/spells.js"
@@ -10,7 +10,8 @@ import { Projectile, ELEMENT_COLOR } from "./actors.js"
 import { RNG } from "../core/rng.js"
 import { randomLoot } from "../logic/items.js"
 import { DUNGEON_THEMES } from "../logic/dungeongen.js"
-import { weaponClass } from "../audio/sfx.js"
+import { attackDamage, attackTypeFor, weaponConditionMult, ammoTypeOf, isBroken } from "../logic/items.js"
+import { strikeEnemy, wearWeapon, coatWeapon, useRepairTool } from "./combat.js"
 
 const REGION_SURFACE = { ashlands: "ash", redMountain: "ash", molagAmur: "ash", bitterCoast: "mud", azurasCoast: "gravel", westGash: "grass", ascadian: "grass", grazelands: "grass" }
 const DUNGEON_SURFACE = { cave: "gravel", tomb: "stone", dwemer: "metal", daedric: "stone", citadel: "flesh" }
@@ -196,8 +197,14 @@ function updateAttack(game, dt) {
   const w = currentWeapon(c) || FIST
   pc.attackCd -= dt
   if (inp.mouseClicked && pc.attackCd <= 0 && !pc.charging) {
-    if (w.ranged && !findAmmo(c)) {
-      game.msg("You have no arrows.", "#ff9a7a")
+    if (w.ranged && !findAmmo(c, w.ammo || "arrow")) {
+      game.msg(`You have no ${w.crossbow ? "bolts" : "arrows"}.`, "#ff9a7a")
+    } else if (w.crossbow) {
+      // crossbows loose at full power on the click, then reload
+      pc.attackCd = 1.1 / w.speed
+      c.fatigue = Math.max(0, c.fatigue - 2)
+      fireRanged(game, w, 1)
+      game.viewmodel.recoil = 1
     } else {
       pc.charging = true
       pc.chargeT = 0
@@ -213,18 +220,24 @@ function updateAttack(game, dt) {
       game.viewmodel.draw = 0
       pc.attackCd = 0.35 / w.speed
       c.fatigue = Math.max(0, c.fatigue - (2 + (w.weight || 0) * 0.12))
-      if (w.ranged) fireArrow(game, w, charge)
+      if (w.ranged) fireRanged(game, w, charge)
+      else if (w.thrown) throwWeapon(game, w, charge)
       else {
+        // the direction you move picks the attack, as in Morrowind
+        const fwd = (inp.action("forward") || inp.down("ArrowUp") ? 1 : 0) - (inp.action("back") || inp.down("ArrowDown") ? 1 : 0)
+        const strafe = (inp.action("right") || inp.down("ArrowRight") ? 1 : 0) - (inp.action("left") || inp.down("ArrowLeft") ? 1 : 0)
+        const type = attackTypeFor(fwd, strafe)
         game.viewmodel.swing = 1
+        game.viewmodel.swingType = type
         game.audio.play("swing", { weight: w.weight })
-        pc.pendingHit = { t: 0.13, charge, weapon: w }
+        pc.pendingHit = { t: 0.13, charge, weapon: w, type }
       }
     }
   }
   if (pc.pendingHit) {
     pc.pendingHit.t -= dt
     if (pc.pendingHit.t <= 0) {
-      meleeHit(game, pc.pendingHit.weapon, pc.pendingHit.charge)
+      meleeHit(game, pc.pendingHit.weapon, pc.pendingHit.charge, pc.pendingHit.type)
       pc.pendingHit = null
     }
   }
@@ -232,16 +245,17 @@ function updateAttack(game, dt) {
 
 function attackStats(game, skill) {
   const c = game.char
+  const blind = equippedUnique(c, "blinding") ? 25 : 0
   return {
     skill: getSkill(c, skill),
     agility: getAttr(c, "agility"),
     luck: getAttr(c, "luck"),
     fatigue: fatigueRatio(c),
-    bonus: BIRTHSIGNS[c.sign].attack || 0,
+    bonus: (BIRTHSIGNS[c.sign].attack || 0) - blind,
   }
 }
 
-function meleeHit(game, w, charge) {
+function meleeHit(game, w, charge, type = "chop") {
   const c = game.char
   const pc = game.pc
   const fx = -Math.sin(pc.yaw)
@@ -256,7 +270,9 @@ function meleeHit(game, w, charge) {
     if (d > w.reach + e.radius + 0.4) continue
     const dy = e.pos.y - pc.pos.y
     if (dy > 2.4 + (e.def.flying ? 1.5 : 0) || dy < -2.2) continue
-    if (d > 0.8 && (dx * fx + dz * fz) / d < 0.55) continue
+    // slashes sweep a wider arc; thrusts need a straighter line
+    const arc = type === "slash" ? 0.35 : type === "thrust" ? 0.7 : 0.55
+    if (d > 0.8 && (dx * fx + dz * fz) / d < arc) continue
     if (d < bestD) {
       bestD = d
       best = e
@@ -266,56 +282,84 @@ function meleeHit(game, w, charge) {
   const chance = hitChance(attackStats(game, w.skill), best.evasion)
   game.setTarget(best)
   if (Math.random() > chance) return game.audio.play("whiff", { pos: best.center })
-  let dmg = meleeDamage(w.damage, getAttr(c, "strength"), charge)
+  let dmg = meleeDamage(attackDamage(w, type), getAttr(c, "strength"), charge) * weaponConditionMult(w)
   if (w === FIST) dmg += getSkill(c, "handToHand") / 12
   const sneak = game.pc.sneaking && !best.aware
   if (sneak) dmg *= 3
-  const dealt = best.takeDamage(dmg, { physical: true, silver: w.silver || w.bound || w.relic })
-  if (w.enchant?.element) best.takeDamage(w.enchant.amount * (0.6 + charge * 0.4), { element: w.enchant.element })
-  if (w.enchant?.absorb) {
-    const a = w.enchant.amount * (0.6 + charge * 0.4)
-    best.takeDamage(a, {})
-    c.health = Math.min(maxHealth(c), c.health + a)
-  }
-  game.audio.hit(best.material, weaponClass(w), best.center, 0.7 + charge * 0.5)
+  const heavy = sneak || (charge > 0.75 && ((w.weight || 0) >= 18 || w.skill === "bluntWeapon" || w.skill === "axe"))
+  const dealt = strikeEnemy(game, best, { weapon: w === FIST ? null : w, dmg, charge, enchant: w.enchant, silver: w.silver || w.bound || w.relic, heavy })
   game.exercise(w.skill, 1)
   if (sneak && dealt > 0) game.msg("Sneak attack! Critical hit.", "#ffe080")
 }
 
-function findAmmo(c) {
-  if (c.equipment.ammo && c.inventory.includes(c.equipment.ammo)) return c.equipment.ammo
-  return c.inventory.find(i => i.kind === "ammo") || null
+// Ammunition of the right kind: the equipped stack if it matches, else any.
+function findAmmo(c, type = "arrow") {
+  const eq = c.equipment.ammo
+  if (eq && c.inventory.includes(eq) && ammoTypeOf(eq) === type) return eq
+  return c.inventory.find(i => i.kind === "ammo" && ammoTypeOf(i) === type) || null
 }
 
-function fireArrow(game, w, charge) {
-  const c = game.char
-  const ammo = findAmmo(c)
-  if (!ammo) return
-  removeItem(c, ammo, 1)
-  if (!c.inventory.includes(ammo) && c.equipment.ammo === ammo) delete c.equipment.ammo
+function aimRay(game, charge, skill) {
   const cam = game.camera.getWorldPosition(new THREE.Vector3())
   const dir = game.camera.getWorldDirection(new THREE.Vector3())
   const pos = cam.clone().addScaledVector(dir, 0.6)
-  const speed = 18 + 32 * charge
   // Marksman accuracy is rolled on release, like Morrowind.
-  const hit = Math.random() < hitChance(attackStats(game, "marksman"), 0)
+  const hit = Math.random() < hitChance(attackStats(game, skill), 0)
   if (!hit) {
     dir.x += (Math.random() - 0.5) * 0.12
     dir.y += (Math.random() - 0.5) * 0.08
     dir.normalize()
   }
-  const dmg = (w.damage[0] + (w.damage[1] - w.damage[0]) * charge + ammo.bonus) * (0.5 + getAttr(c, "strength") / 200)
+  return { pos, dir }
+}
+
+// Bows and crossbows.
+function fireRanged(game, w, charge) {
+  const c = game.char
+  const type = w.ammo || "arrow"
+  const ammo = findAmmo(c, type)
+  if (!ammo) return
+  const spent = { ...ammo, qty: 1 }
+  removeItem(c, ammo, 1)
+  if (!c.inventory.includes(ammo) && c.equipment.ammo === ammo) delete c.equipment.ammo
+  const { pos, dir } = aimRay(game, charge, "marksman")
+  const speed = w.crossbow ? 55 : 18 + 32 * charge
+  const dmg = (w.damage[0] + (w.damage[1] - w.damage[0]) * charge + ammo.bonus) * (0.5 + getAttr(c, "strength") / 200) * weaponConditionMult(w)
   const sneak = game.pc.sneaking
   game.projectiles.push(
     new Projectile(game, game.area, {
       pos,
       vel: dir.multiplyScalar(speed),
       owner: "player",
-      arrow: { damage: sneak ? dmg * 2 : dmg, silver: w.silver, enchant: w.enchant, sneak },
-      gravity: 6,
+      arrow: { damage: sneak ? dmg * 2 : dmg, silver: w.silver, enchant: ammo.enchant || w.enchant, weapon: w, sneak, kind: type, recover: spent, charge },
+      gravity: w.crossbow ? 3 : 6,
     })
   )
-  game.audio.play("bow")
+  wearWeapon(game, w, 4)
+  game.audio.play(w.crossbow ? "crossbow" : "bow")
+}
+
+// Darts, throwing knives and stars fly from the hand, one from the stack.
+function throwWeapon(game, w, charge) {
+  const c = game.char
+  const spent = { ...w, qty: 1 }
+  removeItem(c, w, 1)
+  const { pos, dir } = aimRay(game, charge, "marksman")
+  const dmg = (w.damage[0] + (w.damage[1] - w.damage[0]) * charge) * (0.6 + getAttr(c, "strength") / 150)
+  const sneak = game.pc.sneaking
+  game.projectiles.push(
+    new Projectile(game, game.area, {
+      pos,
+      vel: dir.multiplyScalar(16 + 22 * charge),
+      owner: "player",
+      arrow: { damage: sneak ? dmg * 2 : dmg, silver: w.silver, enchant: w.enchant, weapon: w, sneak, kind: "thrown", recover: spent, charge },
+      gravity: 7,
+    })
+  )
+  game.viewmodel.swing = 1
+  game.viewmodel.swingType = "throw"
+  game.audio.play("throw")
+  if (!c.inventory.includes(w)) game.msg(`That was your last ${w.name}.`, "#a8a090")
 }
 
 // ---------------- magic ----------------
@@ -346,8 +390,10 @@ export function useQuickslot(game, i) {
   const item = itemForSlot(c, slot)
   if (!item) return game.msg(`You have no ${slot.name} left.`, "#ff9a7a")
   if (item.kind === "potion") return usePotion(game, item)
+  if (item.kind === "poison") return coatWeapon(game, item)
   if (item.eat && item.kind === "misc") return eatItem(game, item)
   if (item.kind === "weapon" || item.kind === "armor" || item.kind === "ammo") {
+    if (isBroken(item)) return game.msg(`${item.name} is broken. Repair it first.`, "#ff9a7a")
     equip(c, item)
     game.audio.play("pickup")
     return game.msg(`Equipped: ${item.name}`, "#c9b88f")
@@ -519,6 +565,8 @@ export function usePotion(game, item) {
   game.audio.play("pickup")
   game.msg(`You drink the ${item.name}.`, "#c9b88f")
 }
+
+export { coatWeapon, useRepairTool }
 
 export function eatItem(game, item) {
   const c = game.char

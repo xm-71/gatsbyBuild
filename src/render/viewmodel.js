@@ -86,10 +86,18 @@ export class ViewModel {
     this.left.add(this.arm(-1, sleeve, glove))
     this.bow = null
     this.string = null
+    this.crossbow = null
     if (weapon) {
       const w = buildWeapon(weapon)
       if (weapon.bound) w.traverse(o => o.isMesh && (o.material = o.material.clone(), o.material.emissive?.set(0x6a1010), o.material.transparent = true, o.material.opacity = 0.85))
-      if (weapon.ranged) {
+      if (weapon.crossbow) {
+        // held level in both hands, pointing forward
+        w.rotation.set(-Math.PI / 2 + 0.06, 0.05, 0)
+        w.scale.setScalar(1.6)
+        w.position.set(-0.4, 0.0, 0.45)
+        this.right.add(w)
+        this.crossbow = w
+      } else if (weapon.ranged) {
         w.rotation.set(0, 0.25, 0.12)
         w.scale.setScalar(2.2)
         w.position.set(0.3, 0.25, -0.15)
@@ -104,7 +112,7 @@ export class ViewModel {
         this.right.add(w)
       }
     }
-    if (shield && !weapon?.ranged) {
+    if (shield && !weapon?.ranged && !weapon?.twoHanded) {
       const s = buildShield(shield)
       s.scale.setScalar(1.15)
       s.rotation.set(0.15, 1.0, 0.25)
@@ -118,17 +126,39 @@ export class ViewModel {
     const amp = moving ? 0.018 : 0.004
     this.root.position.set(Math.cos(this.bob * 0.5) * amp, Math.sin(this.bob) * amp, 0)
     const r = this.right
-    if (this.bow) {
+    this.recoil = Math.max(0, (this.recoil || 0) - dt * 4)
+    if (this.crossbow) {
+      const k = this.recoil
+      r.rotation.set(k * 0.25, 0, 0)
+      r.position.set(0.28, -0.3 + k * 0.03, -0.5 + k * 0.08)
+      this.left.rotation.set(0, 0, 0)
+    } else if (this.bow) {
       this.bow.position.z = -0.02 + this.draw * 0.05
       if (this.string) this.string.position.x = 0.02 + this.draw * 0.2
       r.position.set(0.12, -0.28, -0.5 + this.draw * 0.25)
       r.rotation.set(0, 0, 0)
       this.left.rotation.set(0, 0, 0)
     } else if (this.swing > 0) {
+      // fast strike, slower recovery; each attack type has its own motion
       const t = 1 - this.swing
-      const k = Math.sin(t * Math.PI)
-      r.rotation.set(-0.3 - k * 1.2, k * 0.9, -k * 0.6)
-      r.position.set(0.32 - k * 0.25, -0.32 + k * 0.1, -0.55 - k * 0.15)
+      const p = t < 0.4 ? Math.sin((t / 0.4) * Math.PI / 2) : 1 - (t - 0.4) / 0.6
+      switch (this.swingType) {
+        case "thrust":
+          r.rotation.set(-1.35 * p, 0.1 * p, 0)
+          r.position.set(0.32 - p * 0.14, -0.32 + p * 0.08, -0.55 - p * 0.38)
+          break
+        case "slash":
+          r.rotation.set(-0.35 - p * 0.45, -0.5 + p * 1.9, -p * 1.3)
+          r.position.set(0.42 - p * 0.45, -0.3 + p * 0.06, -0.55 - p * 0.12)
+          break
+        case "throw":
+          r.rotation.set(0.6 - p * 1.8, 0, 0)
+          r.position.set(0.3, -0.28 + p * 0.12, -0.5 - p * 0.3)
+          break
+        default: // chop: overhead, down through the target
+          r.rotation.set(0.7 - p * 2.1, 0.15 * p, -0.25 * p)
+          r.position.set(0.32 - p * 0.12, -0.26 + p * 0.02, -0.55 - p * 0.14)
+      }
       this.swing = Math.max(0, this.swing - dt * 3.2)
     } else {
       r.rotation.set(this.draw * 0.9, -this.draw * 0.3, this.draw * 0.3)

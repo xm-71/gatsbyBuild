@@ -45,7 +45,13 @@ function extrude(shape, depth, bevel = 0.004) {
 function bladeShape(len, width, kind) {
   const s = new THREE.Shape()
   const w = width / 2
-  if (kind === "katana") {
+  if (kind === "scimitar") {
+    // widens toward a curved, clipped tip
+    s.moveTo(-w, 0)
+    s.quadraticCurveTo(-w * 0.8 + len * 0.1, len * 0.55, -w * 0.2 + len * 0.2, len)
+    s.lineTo(w * 1.6 + len * 0.16, len * 0.8)
+    s.quadraticCurveTo(w * 1.8 + len * 0.05, len * 0.4, w, 0)
+  } else if (kind === "katana") {
     s.moveTo(-w, 0)
     s.quadraticCurveTo(-w * 0.6 + len * 0.05, len * 0.5, -w * 0.2 + len * 0.1, len)
     s.lineTo(w + len * 0.08, len * 0.92)
@@ -87,13 +93,14 @@ export function buildWeapon(item) {
   const color = item.color ?? 0x9a9a9a
   const metal = metalMat(material, color)
   const accent = material === "daedric" ? metalMat("daedric", 0x2a0a0a) : material === "ebony" ? goldMat() : metalMat("iron", 0x6a5a40)
-  const blades = { dagger: [0.34, 0.05, "leaf"], tanto: [0.4, 0.045, "tanto"], shortsword: [0.58, 0.055, "straight"], longsword: [0.86, 0.055, "straight"], broadsword: [0.8, 0.075, "straight"], katana: [0.85, 0.04, "katana"], claymore: [1.2, 0.085, "straight"] }
+  const blades = { dagger: [0.34, 0.05, "leaf"], tanto: [0.4, 0.045, "tanto"], wakizashi: [0.55, 0.04, "katana"], shortsword: [0.58, 0.055, "straight"], longsword: [0.86, 0.055, "straight"], broadsword: [0.8, 0.075, "straight"], saber: [0.8, 0.045, "katana"], scimitar: [0.72, 0.05, "scimitar"], katana: [0.85, 0.04, "katana"], "dai-katana": [1.12, 0.045, "katana"], claymore: [1.2, 0.085, "straight"] }
+  const curved = base === "katana" || base === "wakizashi" || base === "dai-katana"
   if (blades[base]) {
     const [len, width, kind] = blades[base]
     g.add(mesh(extrude(bladeShape(len, width, kind), 0.012, 0.003), metal, 0, 0.1, 0))
     // fuller groove hint
     if (kind === "straight" && len > 0.5) g.add(mesh(new THREE.BoxGeometry(width * 0.18, len * 0.6, 0.016), metalMat("iron", 0x444444), 0, 0.1 + len * 0.35, 0))
-    const guardW = base === "katana" ? 0.07 : width * 3.2
+    const guardW = curved ? 0.07 : width * 3.2
     if (material === "daedric") {
       const gs = new THREE.Shape()
       gs.moveTo(-guardW, 0.03)
@@ -105,13 +112,17 @@ export function buildWeapon(item) {
       gs.lineTo(-guardW * 0.6, 0.06)
       gs.closePath()
       g.add(mesh(extrude(gs, 0.03), accent, 0, 0.07, 0))
-    } else if (base === "katana") {
+    } else if (curved) {
       g.add(mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.012, seg(12)), accent, 0, 0.09, 0))
+    } else if (base === "saber") {
+      // knuckle bow sweeping from the guard to the pommel
+      g.add(mesh(new THREE.BoxGeometry(0.1, 0.02, 0.03), accent, 0, 0.09, 0))
+      g.add(mesh(new THREE.TorusGeometry(0.075, 0.008, 5, seg(12), Math.PI), accent, 0.035, 0.02, 0, 0, 0, -Math.PI / 2))
     } else {
       g.add(mesh(new THREE.BoxGeometry(guardW, 0.025, 0.035), accent, 0, 0.09, 0))
       for (const sx of [-1, 1]) g.add(mesh(new THREE.SphereGeometry(0.018, 6, 4), accent, (sx * guardW) / 2, 0.09, 0))
     }
-    const gripLen = base === "claymore" || base === "katana" ? 0.28 : 0.14
+    const gripLen = base === "dai-katana" ? 0.34 : base === "claymore" || base === "katana" ? 0.28 : 0.14
     g.add(mesh(new THREE.CylinderGeometry(0.016, 0.018, gripLen, 8), leatherMat(), 0, 0.08 - gripLen / 2, 0))
     g.add(mesh(new THREE.SphereGeometry(0.026, 8, 6), accent, 0, 0.08 - gripLen - 0.01, 0))
     return g
@@ -130,6 +141,70 @@ export function buildWeapon(item) {
     g.add(mesh(extrude(s, 0.018), metal, 0.02, L - 0.24, 0))
     if (base === "battle axe") g.add(mesh(extrude(s, 0.018), metal, -0.02, L - 0.24, 0, 0, Math.PI, 0))
     g.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.1, 8), accent, 0, L - 0.2, 0))
+    return g
+  }
+  if (base === "staff") {
+    g.add(mesh(lathe([[0.018, -0.3], [0.022, 0.4], [0.02, 1.2], [0.026, 1.45], [0.01, 1.5]], seg(8)), woodMat()))
+    g.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.08, 8), metal, 0, 1.36, 0))
+    g.add(mesh(new THREE.SphereGeometry(0.045, seg(10), 8), metal, 0, 1.5, 0))
+    g.add(mesh(new THREE.CylinderGeometry(0.026, 0.02, 0.06, 8), metal, 0, -0.3, 0))
+    return g
+  }
+  if (base === "spiked club") {
+    g.add(mesh(lathe([[0.02, -0.12], [0.03, 0.2], [0.055, 0.5], [0.06, 0.62], [0.012, 0.67]], seg(10)), woodMat()))
+    for (let r = 0; r < 3; r++)
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + r * 0.5
+        const y = 0.38 + r * 0.1
+        const rad = 0.045 + r * 0.006
+        g.add(mesh(new THREE.ConeGeometry(0.012, 0.05, 4), metal, Math.cos(a) * rad, y, Math.sin(a) * rad, Math.sin(a) * Math.PI / 2, 0, -Math.cos(a) * Math.PI / 2))
+      }
+    return g
+  }
+  if (item.thrown) {
+    if (base === "throwing star") {
+      const st = new THREE.Shape()
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2
+        const r = i % 2 ? 0.02 : 0.075
+        st[i ? "lineTo" : "moveTo"](Math.cos(a) * r, Math.sin(a) * r)
+      }
+      st.closePath()
+      const hole = new THREE.Path()
+      hole.absarc(0, 0, 0.01, 0, Math.PI * 2, true)
+      st.holes.push(hole)
+      g.add(mesh(extrude(st, 0.006, 0.002), metal, 0, 0.06, 0))
+      return g
+    }
+    if (base === "throwing knife") {
+      g.add(mesh(extrude(bladeShape(0.17, 0.035, "leaf"), 0.008, 0.002), metal, 0, 0.06, 0))
+      g.add(mesh(new THREE.BoxGeometry(0.02, 0.07, 0.012), leatherMat(), 0, 0.025, 0))
+      g.add(mesh(new THREE.TorusGeometry(0.018, 0.004, 4, 10), metal, 0, -0.022, 0))
+      return g
+    }
+    // dart: needle point, shaft and fletching
+    g.add(mesh(new THREE.ConeGeometry(0.01, 0.07, 6), metal, 0, 0.2, 0))
+    g.add(mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.17, 5), woodMat(), 0, 0.08, 0))
+    for (const r of [0, Math.PI / 2]) g.add(mesh(new THREE.BoxGeometry(0.04, 0.05, 0.002), new THREE.MeshLambertMaterial({ color: 0x8a3020, side: THREE.DoubleSide }), 0, 0.0, 0, 0, r, 0))
+    return g
+  }
+  if (base === "crossbow") {
+    // stock along +Y (the bolt's direction), prod across the front
+    g.add(mesh(new THREE.BoxGeometry(0.05, 0.62, 0.06), woodMat(), 0, 0.12, 0))
+    g.add(mesh(new THREE.BoxGeometry(0.04, 0.16, 0.08), woodMat(), 0, -0.2, -0.03, 0.35, 0, 0))
+    const prod = []
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8 - 0.5
+      prod.push(new THREE.Vector3(t * 0.56, 0.4 - Math.abs(t) * Math.abs(t) * 0.35, 0.015))
+    }
+    g.add(mesh(taperTube(prod, 0.014, 0.014, 6, 12), metal))
+    const str = new THREE.Mesh(new THREE.CylinderGeometry(0.002, 0.002, 0.52, 3), new THREE.MeshBasicMaterial({ color: 0xd8d0c0 }))
+    str.rotation.z = Math.PI / 2
+    str.position.set(0, 0.32, 0.015)
+    str.name = "string"
+    g.add(str)
+    g.add(mesh(new THREE.BoxGeometry(0.02, 0.05, 0.02), metal, 0, 0.0, -0.045))
+    if (material === "dwemer") for (const y of [0.05, 0.22]) g.add(mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.02, seg(10)), metal, 0.04, y, 0, 0, 0, Math.PI / 2))
     return g
   }
   if (base === "club" || base === "mace" || base === "warhammer") {
@@ -152,9 +227,11 @@ export function buildWeapon(item) {
     }
     return g
   }
-  if (base === "spear" || base === "halberd") {
-    haft(1.9, 0.018)
-    g.add(mesh(extrude(bladeShape(0.3, 0.06, "leaf"), 0.012), metal, 0, 1.72, 0))
+  if (base === "spear" || base === "halberd" || base === "long spear") {
+    const H = base === "long spear" ? 2.4 : 1.9
+    haft(H, 0.018)
+    g.add(mesh(extrude(bladeShape(base === "long spear" ? 0.36 : 0.3, 0.06, "leaf"), 0.012), metal, 0, H - 0.18, 0))
+    if (base === "long spear") g.add(mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.08, 8), accent, 0, H - 0.2, 0))
     if (base === "halberd") {
       const s = new THREE.Shape()
       s.moveTo(0, 0)

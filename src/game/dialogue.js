@@ -7,7 +7,7 @@ import { REGIONS } from "../logic/worldgen.js"
 import { getAttr, getSkill, maxHealth, addItem, removeItem, raiseSkill } from "../logic/character.js"
 import { buyPrice, sellPrice, persuadeChance } from "../logic/combat.js"
 import { generateQuest, canPromote } from "../logic/quests.js"
-import { randomPotion, randomMisc, randomWeapon, randomArmor, makeLockpick, makeArrows, makeQuestItem } from "../logic/items.js"
+import { randomPotion, randomMisc, randomWeapon, randomArmor, makeLockpick, makeArrows, makeBolts, makeQuestItem, makeWeapon, makeRepairTool, randomAmmo, randomPoison, repairCost, hasCondition } from "../logic/items.js"
 import { DUNGEON_THEMES } from "../logic/dungeongen.js"
 
 const GREAT_HOUSES = ["redoran", "hlaalu", "telvanni"]
@@ -72,6 +72,7 @@ export function services(game, npc) {
   const role = npc.role
   const F = npc.faction ? FACTIONS[npc.faction] : null
   if (role === "trader" || role === "smith") s.push("barter")
+  if (role === "smith" || (role === "guildmaster" && (npc.faction === "fightersGuild" || npc.faction === "legion"))) s.push("repair")
   if (role === "priest") s.push("healing", "spells")
   if (role === "caravaner") s.push("travel")
   if (role === "guildmaster" && F) for (const x of F.services) if (!s.includes(x)) s.push(x)
@@ -254,16 +255,38 @@ export function merchantStock(game, npc) {
   if (role === "smith") {
     for (let i = 0; i < 6; i++) items.push(randomWeapon(rng, tier, 0.1))
     for (let i = 0; i < 6; i++) items.push(randomArmor(rng, tier, 0.1))
-    items.push(makeArrows(40), makeArrows(20, "steel"))
+    items.push(makeArrows(40), makeArrows(20, "steel"), makeBolts(30), makeBolts(15, "steel"))
+    items.push(makeWeapon(rng.pick(["iron", "steel"]), rng.pick(["dart", "throwing knife", "throwing star"]), null, rng.int(10, 25)))
+    if (tier >= 2) items.push(makeWeapon(tier >= 4 ? "dwemer" : "steel", "crossbow"))
+    items.push(makeRepairTool(1), makeRepairTool(1), makeRepairTool(Math.min(4, 1 + Math.floor(tier / 2))))
+    if (tier >= 3) items.push(randomAmmo(rng, tier))
   } else {
     for (let i = 0; i < 7; i++) items.push(randomPotion(rng, tier))
     for (let i = 0; i < 4; i++) items.push(randomMisc(rng, "town"))
-    items.push(makeLockpick(1, 3), makeLockpick(2, 1), makeArrows(30))
+    items.push(makeLockpick(1, 3), makeLockpick(2, 1), makeArrows(30), makeBolts(20))
+    items.push(randomPoison(rng, tier), randomPoison(rng, tier))
     items.push(randomWeapon(rng, tier), randomArmor(rng, tier))
   }
   const stock = { items, gold: 600 + tier * 300 }
   game.merchantStock.set(key, stock)
   return stock
+}
+
+// Smiths restore worn and broken gear for a fee.
+export function repairPrice(game, npc, item) {
+  const d = disposition(game, npc)
+  return Math.max(1, Math.round(repairCost(item) * (1.2 - getSkill(game.char, "mercantile") / 400 - d / 500)))
+}
+
+export function repair(game, npc, item) {
+  const c = game.char
+  if (!hasCondition(item) || item.cond >= item.maxCond) return ""
+  const price = repairPrice(game, npc, item)
+  if (c.gold < price) return "You can't afford that."
+  c.gold -= price
+  item.cond = item.maxCond
+  game.audio.play("repair")
+  return `${item.name} is as good as new. (${price} gold)`
 }
 
 export function priceContext(game, npc) {

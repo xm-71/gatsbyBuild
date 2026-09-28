@@ -1,4 +1,5 @@
-import { reserveItemUids } from "../logic/items.js"
+import { reserveItemUids, ensureCondition } from "../logic/items.js"
+import { SKILL_IDS } from "../data/stats.js"
 import { reserveQuestIds } from "../logic/quests.js"
 
 // Roguelike-style suspend save: one slot, written continuously while you play
@@ -47,6 +48,12 @@ function restoreChar(data) {
   c.equipment = {}
   for (const [slot, uid] of Object.entries(data.equipment || {})) if (byUid.has(uid)) c.equipment[slot] = byUid.get(uid)
   c.effects = (data.effects || []).map(e => ({ ...e, prev: e.prev != null ? byUid.get(e.prev) || null : null }))
+  // skills added since the save was written start at their base value
+  for (const id of SKILL_IDS) {
+    if (c.skills[id] == null) c.skills[id] = 5
+    if (c.skillProgress[id] == null) c.skillProgress[id] = 0
+  }
+  c.inventory.forEach(ensureCondition)
   c.dead = false
   return c
 }

@@ -200,3 +200,10 @@ p.small { font-size: 13px; margin: 2px 0; }
 .cb-mark.main { color: #ff9a40; }
 .cb-mark em { display: block; font-style: normal; font-size: 9px; margin-top: 1px; color: #f0e0b0; }
 @media (max-width: 700px) { .compassbar { width: 280px; } }
+
+.condbar { display: block; height: 3px; width: 70px; background: #2a241c; margin-top: 2px; }
+.condbar span { display: block; height: 100%; }
+.item.broken span:first-child { color: #c06050; }
+.coating { color: #9ae070; margin-top: 6px; }
+.repairlist { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.repairlist button { text-align: left; }

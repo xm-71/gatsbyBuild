@@ -21,6 +21,7 @@ export const SKILLS = {
   axe: { name: "Axe", spec: "combat", attr: "strength" },
   spear: { name: "Spear", spec: "combat", attr: "endurance" },
   athletics: { name: "Athletics", spec: "combat", attr: "speed" },
+  armorer: { name: "Armorer", spec: "combat", attr: "strength" },
 
   destruction: { name: "Destruction", spec: "magic", attr: "willpower" },
   alteration: { name: "Alteration", spec: "magic", attr: "willpower" },

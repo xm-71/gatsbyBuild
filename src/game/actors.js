@@ -3,6 +3,7 @@ import { CREATURES } from "../data/creatures.js"
 import { RACES } from "../data/stats.js"
 import { FACTIONS } from "../data/factions.js"
 import { buildCreatureMesh, buildNpcMesh, LodSwitch } from "../render/creatures.js"
+import { buildWeapon } from "../render/items.js"
 import { makeLabel } from "../render/textures.js"
 import { hitChance, evasionOf, applyArmor } from "../logic/combat.js"
 import { getAttr, getSkill } from "../logic/character.js"
@@ -36,6 +37,7 @@ export class Enemy {
     this.aware = false
     this.cooldown = 0
     this.windup = 0
+    this.windupTotal = 1
     this.castCooldown = 2 + Math.random() * 2
     this.paralyzed = 0
     this.calmed = 0
@@ -48,6 +50,7 @@ export class Enemy {
     this.t = Math.random() * 10
     this.spawnKey = opts.spawnKey
     this.relic = opts.relic || null
+    this.artifact = opts.artifact || null
     this.questItem = opts.questItem || null
     this.tier = opts.tier || 1
     this.loot = null
@@ -55,6 +58,12 @@ export class Enemy {
     this.material = bodyMaterial(base)
     this.voiceT = 4 + Math.random() * 10
     this.painT = 0
+    this.dots = [] // poison and other damage over time
+    this.weakenT = 0
+    this.weakenAmt = 0
+    this.staggerT = 0
+    this.knock = new THREE.Vector3()
+    this.stuck = [] // arrows and thrown weapons you can take back from the corpse
 
     const built = buildCreatureMesh(base)
     this.mesh = built.group
@@ -102,6 +111,18 @@ export class Enemy {
     return dmg
   }
 
+  // Knocked off balance: the attack in progress is lost and it reels back.
+  stagger(time, from) {
+    if (this.dead) return
+    this.staggerT = Math.max(this.staggerT, time)
+    this.windup = 0
+    const dx = this.pos.x - from.x
+    const dz = this.pos.z - from.z
+    const d = Math.hypot(dx, dz) || 1
+    const push = (this.boss ? 1.2 : 2.6) / Math.max(0.6, this.def.scale || 1)
+    this.knock.set((dx / d) * push, 0, (dz / d) * push)
+  }
+
   die() {
     this.dead = true
     this.hp = 0
@@ -134,13 +155,33 @@ export class Enemy {
     this.castCooldown -= dt
     this.hurtT -= dt
     this.painT -= dt
-    this.attackAnim = Math.max(0, this.attackAnim - dt * 3)
+    if (this.windup <= 0) this.attackAnim = Math.max(0, this.attackAnim - dt * 3)
     if (this.calmed > 0) this.calmed -= dt
+    if (this.weakenT > 0) this.weakenT -= dt
+    if (this.dots.length) {
+      for (const d of this.dots) {
+        d.t -= dt
+        this.takeDamage(d.dps * dt, { element: d.element })
+      }
+      this.dots = this.dots.filter(d => d.t > 0)
+      if (this.dead) return
+    }
     if (this.paralyzed > 0) {
       this.paralyzed -= dt
       this.anim(this.t, 0, 0)
       return
     }
+    if (this.staggerT > 0) {
+      this.staggerT -= dt
+      this.pos.addScaledVector(this.knock, dt)
+      this.knock.multiplyScalar(Math.max(0, 1 - dt * 5))
+      this.area.resolve(this.pos, this.radius, this.pos.y)
+      this.mesh.position.copy(this.pos)
+      this.mesh.rotation.x = -Math.min(0.35, this.staggerT * 0.8) // rock back
+      this.anim(this.t, 0, 0)
+      return
+    }
+    this.mesh.rotation.x = 0
     const pc = g.pc
     const dx = pc.pos.x - this.pos.x
     const dz = pc.pos.z - this.pos.z
@@ -179,6 +220,8 @@ export class Enemy {
     } else if (this.aware) {
       if (this.windup > 0) {
         this.windup -= dt
+        // raise the weapon, claws or head through the wind-up, then strike
+        this.attackAnim = Math.min(1, 1 - this.windup / this.windupTotal)
         if (this.windup <= 0) this.resolveMelee(dist, dy, reach)
       } else if (dist > reach * 0.8) {
         const d = this.area.kind === "dungeon" ? this.area.pathDir(this.pos, pc.pos) : { x: dx / dist, z: dz / dist }
@@ -192,9 +235,11 @@ export class Enemy {
         g.enemyCast(this, this.def.caster)
       }
       if (dist <= reach + 0.45 && this.cooldown <= 0 && this.windup <= 0 && Math.abs(dy) < 2.6 + (this.def.flying ? 2 : 0)) {
-        this.windup = 0.38
-        this.attackAnim = 1
+        // heavier creatures telegraph longer: step back out of reach to dodge
+        this.windupTotal = this.windup = 0.42 + Math.min(0.35, ((this.def.scale || 1) - 1) * 0.4) + (this.boss ? 0.12 : 0)
+        this.attackAnim = 0
         this.cooldown = 1.25 / this.def.rate
+        g.audio.play("windup", { pos: this.center })
       }
     } else {
       this.wanderT -= dt
@@ -258,11 +303,13 @@ export class Enemy {
     if (dist > reach + 0.9 || Math.abs(dy) > 3 + (this.def.flying ? 2 : 0)) return
     const c = g.char
     const chance = hitChance({ skill: 22 + this.level * 4, agility: this.def.agility, luck: 40, fatigue: 1 }, g.playerEvasion())
+    this.attackAnim = 1
     if (Math.random() > chance) {
       g.audio.play("whiff", { pos: this.center })
       return
     }
-    const dmg = this.dmg[0] + Math.random() * (this.dmg[1] - this.dmg[0])
+    this.attackAnim = 1
+    const dmg = (this.dmg[0] + Math.random() * (this.dmg[1] - this.dmg[0])) * (this.weakenT > 0 ? 1 - this.weakenAmt : 1)
     g.damagePlayer(dmg, { physical: true, source: this })
     if (this.def.element && !c.dead) g.damagePlayer(dmg * 0.4, { element: this.def.element, source: this, quiet: true })
   }
@@ -363,9 +410,22 @@ export class Projectile {
     this.gravity = gravity
     this.life = 4
     this.dead = false
-    if (arrow) {
-      this.mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.8, 4), new THREE.MeshLambertMaterial({ color: 0x6a5030 }))
+    if (arrow?.kind === "thrown") {
+      // the thrown weapon itself, spinning (darts and knives fly point-first)
+      this.mesh = new THREE.Group()
+      const m = buildWeapon(arrow.weapon)
+      m.rotation.x = Math.PI / 2
+      m.scale.setScalar(1.3)
+      this.inner = new THREE.Group()
+      this.inner.add(m)
+      this.mesh.add(this.inner)
+      this.spin = arrow.weapon.base === "throwing star" ? 22 : arrow.weapon.base === "throwing knife" ? 14 : 0
+    } else if (arrow) {
+      const bolt = arrow.kind === "bolt"
+      const col = arrow.enchant?.element ? ELEMENT_COLOR[arrow.enchant.element] : 0x6a5030
+      this.mesh = new THREE.Mesh(new THREE.CylinderGeometry(bolt ? 0.022 : 0.015, bolt ? 0.022 : 0.015, bolt ? 0.45 : 0.8, 4), new THREE.MeshLambertMaterial({ color: 0x6a5030, emissive: arrow.enchant ? col : 0x000000, emissiveIntensity: 0.6 }))
       this.mesh.geometry.rotateX(Math.PI / 2)
+      if (arrow.enchant?.element) this.mesh.add(new THREE.PointLight(col, 2, 5, 2))
     } else {
       this.mesh = new THREE.Group()
       const core = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), new THREE.MeshBasicMaterial({ color }))
@@ -408,6 +468,7 @@ export class Projectile {
     }
     this.mesh.position.copy(this.pos)
     if (this.arrow) this.mesh.lookAt(this.pos.clone().add(this.vel))
+    if (this.spin && this.inner) this.inner.rotation.y += this.spin * dt
   }
 
   destroy() {

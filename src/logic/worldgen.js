@@ -1,3 +1,4 @@
+import { ARTIFACT_IDS } from "../data/artifacts.js"
 import { RNG } from "../core/rng.js"
 import { createNoise2D } from "../core/noise.js"
 import { placeName, dungeonName, npcName, artifactName, dagothName } from "./names.js"
@@ -218,6 +219,12 @@ export function generateWorld(seed) {
     target.levels = Math.max(target.levels, 2)
     mainQuest.relics.push({ name: relicNames[i], dungeonId: target.id })
   })
+  // Legendary artifacts: every Daedric shrine's master carries one, and a few
+  // other strong dungeon bosses guard the rest. Forked RNG keeps worlds stable.
+  const artRng = rng.fork("artifacts")
+  const pool = artRng.shuffle([...ARTIFACT_IDS])
+  const holders = [...dungeons.filter(d => d.type === "daedric"), ...artRng.shuffle(dungeons.filter(d => d.type !== "daedric" && d.tier >= 3))]
+  for (const d of holders.slice(0, Math.min(pool.length, dungeons.filter(d => d.type === "daedric").length + 4))) d.artifact = pool.pop()
   const cr = { x: rm.x + 6, z: rm.z + 6 }
   const citadel = { id: dungeons.length, name: "Dagoth Ur Citadel", type: "citadel", x: cr.x, z: cr.z, y: heightAt(cr.x, cr.z), tier: 7, levels: 3, region: "redMountain", seed: rng.int(1, 1e9), discovered: true, cleared: false, sealed: true, citadel: true }
   flatten(cr.x, cr.z, 8, citadel.y)

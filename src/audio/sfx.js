@@ -245,6 +245,8 @@ export function misc(e, out, name, opts = {}) {
       const heavy = Math.min(1, (opts.weight || 10) / 40)
       return e.noise(out, { dur: 0.22 + heavy * 0.1, gain: 0.22, freq: 1100 - heavy * 600, sweep: -500, q: 0.9 })
     }
+    case "windup":
+      return e.noise(out, { dur: 0.35, gain: 0.05, freq: 500, sweep: 900, q: 1.5, a: 0.2 })
     case "whiff":
       return e.noise(out, { dur: 0.18, gain: 0.12, freq: 1500, sweep: -900, q: 1.2 })
     case "block":

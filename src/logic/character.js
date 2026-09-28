@@ -1,5 +1,5 @@
 import { ATTRIBUTES, SKILLS, SKILL_IDS, RACES, CLASSES, BIRTHSIGNS } from "../data/stats.js"
-import { makeItemFromSpec } from "./items.js"
+import { makeItemFromSpec, armorConditionMult, isBroken } from "./items.js"
 
 // Morrowind-style: skills rise by use, every 10 major/minor skill increases
 // earns a level, and attribute multipliers depend on which skills you trained.
@@ -110,7 +110,13 @@ export function getAttr(c, a) {
 }
 
 export function getSkill(c, s) {
-  return c.skills[s]
+  return c.skills[s] ?? 5
+}
+
+// The special effect of an equipped artifact, e.g. equippedUnique(c, "regen").
+export function equippedUnique(c, type) {
+  for (const item of Object.values(c.equipment)) if (item?.unique?.type === type && !isBroken(item)) return item.unique
+  return null
 }
 
 export function maxHealth(c) {
@@ -141,7 +147,7 @@ export function armorRating(c) {
   for (const [slot, w] of Object.entries(ARMOR_SLOT_WEIGHTS)) {
     const item = c.equipment[slot]
     if (item && item.armorClass) {
-      ar += item.ar * (0.3 + getSkill(c, item.armorClass) / 100)
+      ar += item.ar * armorConditionMult(item) * (0.3 + getSkill(c, item.armorClass) / 100)
     } else if (slot !== "shield") {
       empty += w
     }
@@ -171,7 +177,8 @@ export function encumbrance(c) {
 export function moveSpeed(c) {
   const base = 3.2 + getAttr(c, "speed") / 30 + getSkill(c, "athletics") / 45
   const over = encumbrance(c) > carryCapacity(c)
-  return over ? base * 0.4 : base
+  const blinding = equippedUnique(c, "blinding")
+  return (over ? base * 0.4 : base) * (blinding ? 1 + blinding.amount : 1)
 }
 
 export function jumpVelocity(c) {
@@ -213,7 +220,7 @@ export function slotFor(item) {
 
 export function equip(c, item) {
   const slot = slotFor(item)
-  if (!slot) return false
+  if (!slot || isBroken(item)) return false
   if (slot === "shield" && c.equipment.weapon?.twoHanded) delete c.equipment.weapon
   if (slot === "weapon" && item.twoHanded) delete c.equipment.shield
   c.equipment[slot] = item

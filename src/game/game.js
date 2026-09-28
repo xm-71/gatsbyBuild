@@ -18,6 +18,11 @@ import { updatePlayer, spellEffectsOnEnemy } from "./player.js"
 import { UI } from "../ui/ui.js"
 import { loadWorld } from "./worldLoader.js"
 import { writeSave, deleteSave, restoreRun } from "./save.js"
+import { strikeEnemy, wearArmor } from "./combat.js"
+import { Particles } from "../render/particles.js"
+import { makeArtifact } from "../logic/items.js"
+import { equippedUnique } from "../logic/character.js"
+import { ARTIFACTS } from "../data/artifacts.js"
 import { showLoading, hideLoading } from "../ui/loading.js"
 import { Q } from "../core/quality.js"
 import { onSettingsChange } from "../core/settings.js"
@@ -58,6 +63,7 @@ export class Game {
     this.timer = new THREE.Timer()
     this.projectiles = []
     this.flashes = []
+    this.particles = new Particles()
     this.daylight = 1
     this.titleT = 0
     window.addEventListener("resize", () => this.resize())
@@ -210,6 +216,7 @@ export class Game {
     area.scene.environment = this.envMap
     area.scene.environmentIntensity = area.kind === "dungeon" ? 0.25 : 0.6
     area.scene.add(this.camera)
+    this.particles.attach(area.scene)
     area.scene.updateMatrixWorld()
     this.audio.enterArea(area)
   }
@@ -314,6 +321,9 @@ export class Game {
     for (const p of this.projectiles) p.update(dt)
     this.projectiles = this.projectiles.filter(p => !p.dead)
     this.updateFlashes(dt)
+    this.particles.update(dt)
+    const regen = equippedUnique(c, "regen")
+    if (regen && c.health > 0) c.health = Math.min(maxHealth(c), c.health + regen.amount * dt)
 
     // timed effects
     const expired = tickEffects(c, dt)
@@ -386,7 +396,8 @@ export class Game {
   // ---------- combat plumbing ----------
 
   chameleon() {
-    return Math.min(0.95, effectAmount(this.char, "chameleon"))
+    const shadow = this.char.equipment.weapon?.unique?.type === "shadow" ? this.char.equipment.weapon.unique.amount : 0
+    return Math.min(0.95, effectAmount(this.char, "chameleon") + shadow)
   }
 
   playerEvasion() {
@@ -407,9 +418,11 @@ export class Game {
         if (diff > Math.PI) diff = Math.PI * 2 - diff
         if (diff < 1.2 && Math.random() < blockChance(getSkill(c, "block"), getAttr(c, "agility"), getAttr(c, "luck"))) {
           this.audio.play("block", { wood: ["netch leather", "chitin", "bonemold"].includes(shield.material) })
+          this.particles.burst(this.camera.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(-Math.sin(this.pc.yaw), -0.4, -Math.cos(this.pc.yaw)).multiplyScalar(0.8)), "metal", 10)
           this.msg("Blocked!", "#c0c0c0")
           this.exercise("block", 1)
           c.fatigue = Math.max(0, c.fatigue - 4)
+          wearArmor(this, shield, amount * 0.6)
           return
         }
       }
@@ -417,8 +430,13 @@ export class Game {
       const slots = ["cuirass", "helm", "greaves", "boots", "gauntlets", "shield"]
       const slot = slots[Math.floor(Math.random() * slots.length)]
       const piece = c.equipment[slot]
-      if (piece?.armorClass) this.exercise(piece.armorClass, 1)
-      else if (slot !== "shield") this.exercise("unarmored", 1)
+      if (piece?.armorClass) {
+        this.exercise(piece.armorClass, 1)
+        wearArmor(this, piece, dmg)
+      } else if (slot !== "shield") this.exercise("unarmored", 1)
+      // Ebony Mail and the like burn whoever strikes you
+      const shieldFx = equippedUnique(c, "fireShield")
+      if (shieldFx && source && !source.dead) source.takeDamage(shieldFx.amount, { element: "fire" })
     }
     if (element) {
       dmg *= 1 - resistance(c, element)
@@ -487,13 +505,17 @@ export class Game {
 
   projectileImpact(p, target) {
     if (p.arrow) {
+      const a = p.arrow
       if (target && target !== "player") {
-        const dealt = target.takeDamage(p.arrow.damage, { physical: true, silver: p.arrow.silver })
-        if (p.arrow.enchant?.element) target.takeDamage(p.arrow.enchant.amount, { element: p.arrow.enchant.element })
-        this.audio.hit(target.material, "arrow", target.center)
+        const dealt = strikeEnemy(this, target, { weapon: a.weapon, dmg: a.damage, charge: a.charge ?? 1, ranged: true, enchant: a.enchant, silver: a.silver, heavy: a.kind === "bolt" && (a.charge ?? 1) > 0.9, noCoat: a.kind !== "thrown" })
         this.exercise("marksman", 1)
         this.setTarget(target)
-        if (dealt > 0 && p.arrow.sneak) this.msg("Sneak attack! Critical hit.", "#ffe080")
+        if (dealt > 0 && a.sneak) this.msg("Sneak attack! Critical hit.", "#ffe080")
+        // some arrows, bolts and thrown weapons survive to be taken back
+        if (a.recover && Math.random() < (a.kind === "thrown" ? 0.6 : 0.4)) target.stuck.push(a.recover)
+      } else {
+        this.audio.play("stick", { pos: p.pos.clone() })
+        this.particles.burst(p.pos, "stone", 5)
       }
       return
     }
@@ -574,7 +596,14 @@ export class Game {
       loot.push(...randomLoot(new RNG(Math.random() * 1e9), Math.min(7, tier + 1), this.area.kind === "dungeon" ? DUNGEON_THEMES[this.area.dungeon.type].lootTag : "any", 3))
       gold += 50 * tier + Math.round(Math.random() * 100 * tier)
       if (e.relic) loot.push(makeRelic(e.relic))
+      if (e.artifact) loot.push(makeArtifact(e.artifact))
       if (e.questItem) loot.push(makeQuestItem(e.questItem.name, e.questItem.questId))
+    }
+    // take back what stuck in the body, merging stacks
+    for (const it of e.stuck) {
+      const same = loot.find(l => l.stackKey && l.stackKey === it.stackKey)
+      if (same) same.qty += it.qty
+      else loot.push({ ...it })
     }
     e.loot = loot
     e.gold = gold
@@ -606,6 +635,7 @@ export class Game {
           }
         }
         if (e.relic) this.msg(`${e.name} carried ${e.relic}! Search the body.`, "#ffe080")
+        if (e.artifact) this.msg(`${e.name} guarded ${ARTIFACTS[e.artifact].name}! Search the body.`, "#ffe080")
       }
       if (e.defId === "dagoth") setTimeout(() => this.victory(), 2500)
     }
@@ -627,6 +657,12 @@ export class Game {
   }
 
   onItemTaken(item) {
+    if (item.artifact && !this.char.artifactsFound?.includes(item.artifact)) {
+      ;(this.char.artifactsFound ||= []).push(item.artifact)
+      this.msg(`Legendary artifact: ${item.name}!`, "#ffe080")
+      this.addJournal(`I found ${item.name}. ${item.lore}`)
+      this.audio.sting("discover")
+    }
     if (item.relic) {
       const held = this.relicsHeld()
       this.msg(`You have recovered ${item.relic}. (${held.length}/3)`, "#ffe080")

@@ -256,6 +256,7 @@ export class DungeonArea {
         tier: dungeon.tier,
         spawnKey: i,
         relic: s.boss ? dungeon.relic : null,
+        artifact: s.boss ? dungeon.artifact : null,
         questItem: s.boss ? dungeon.questItem : null,
         name: s.boss ? (s.creature === "dagoth" ? game.world.mainQuest.dagoth : game.bossName(s.creature, dungeon)) : undefined,
       })

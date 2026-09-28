@@ -11,14 +11,14 @@ npm run build    # static build in dist/ (relative paths, host anywhere)
 npm test         # logic tests (world gen, dungeons, leveling, quests)
 ```
 
-Click the game to capture the mouse. Esc releases it. Every key below can be rebound in **Settings** (title screen or the in-game menu), which also has mouse sensitivity, invert Y, field of view, music and effects volume, and a compass toggle.
+Click the game to capture the mouse. Esc releases it. Every key below can be rebound in **Settings** (title screen or the in-game menu), which also has mouse sensitivity, invert Y, field of view, music, effects and ambience volume, spoken NPC greetings (off by default), and a compass toggle.
 
 The compass at the top of the screen points to your current quest targets and nearby places, and quest targets also appear on the map.
 
 | Key | Action |
 | --- | --- |
 | WASD / mouse | Move / look |
-| Left mouse (hold, release) | Attack. Holding longer gives a stronger swing or a fuller bow draw |
+| Left mouse (hold, release) | Attack. Holding longer gives a stronger swing, a fuller bow draw or a harder throw. Crossbows fire on the click, then reload. The direction you're moving picks the attack: forward thrusts, strafing slashes, standing still or backing off chops |
 | F or right mouse | Cast the selected spell |
 | 1–9 | Use a quick-slot (spell, power, potion or weapon). Assign slots from the inventory or magic tab |
 | Mouse wheel, [ ] | Select a spell or power |
@@ -51,6 +51,14 @@ Pick **Low / Medium / High** in Settings. Your choice is remembered, and changin
 
 The world is generated in a background worker, and the island is built step by step behind a progress bar. Distant trees and parasols switch to simpler models, and far-off characters and creatures switch to a single merged model. This cuts the triangle count by about two thirds with no visible change.
 
+## Sound
+
+All sound is synthesized in the browser with WebAudio. There are no audio files.
+
+- **Adaptive score.** Layered music (pad, lead, colour, bass, war drums, choir) is generated phrase by phrase. Each region, town, dungeon type, night, combat and boss fight has its own mode, tempo and instruments, such as flutes in the Grazelands, a low drone in the Ashlands, bells in Dwemer ruins and choir in tombs. The layers crossfade as the situation changes. An original main theme plays on the title screen and is quoted in the score, with short cues for level-ups, discoveries, victory and death.
+- **Ambience.** Wind and ash grit, rain, surf near the coast, lava, birds by day, crickets at night, town murmur and a distant smithy, cave drips, Dwemer machinery and steam, Daedric chanting, and the heartbeat of the Citadel. Torches crackle where they hang.
+- **Effects.** Positional 3D sound, voices for every creature (idle, alert, pain, death), footsteps that change with the surface and armour weight, weapon impacts per material, a sound for each spell element, block, miss and wind-up sounds, and interface clicks.
+
 ## What's generated
 
 - **The island.** A seeded heightmap with Red Mountain and its crater, surrounded by seven regions arranged at random: Ashlands, West Gash, Bitter Coast, Ascadian Isles, Grazelands, Azura's Coast and Molag Amur (with lava fields). Each region has its own palette, flora (emperor parasols, swamp trees, dead trees, grass and rocks), weather (ash storms, blight storms, rain, fog) and creatures. There's a day/night cycle, and the moons Masser and Secunda rise at night.
@@ -61,8 +69,11 @@ The world is generated in a background worker, and the island is built step by s
 ## Morrowind systems
 
 - **Character creation.** 10 races, 14 classes and 13 birthsigns, each with the attributes, skill bonuses, resistances, powers and magicka modifiers you'd expect.
-- **Skills improve through use** (24 skills). Every 10 increases in major or minor skills earns a level when you rest. Attribute multipliers (×2 to ×5) depend on which skills you trained.
-- **Combat.** Hit chance comes from skill, agility, luck and fatigue, so misses happen, as in the original. Armor rating and armor skills, block with a shield, sneak attacks for triple damage, bows and arrows, and falling damage.
+- **Skills improve through use** (25 skills, including Armorer). Every 10 increases in major or minor skills earns a level when you rest. Attribute multipliers (×2 to ×5) depend on which skills you trained.
+- **Combat.** Hit chance comes from skill, agility, luck and fatigue, so misses happen, as in the original. Armor rating and armor skills, block with a shield, sneak attacks for triple damage, and falling damage. Each melee weapon has chop, slash and thrust damage (spears reward thrusting, axes chopping). Heavy blows stagger enemies, and enemies wind up visibly before they strike, so you can step out of reach. Hits throw sparks, blood, ichor, bone dust, wisps or ash depending on what you hit.
+- **Arsenal.** 27 weapon types, including wakizashi, dai-katana, saber, scimitar, staff, spiked club and long spear. There are bows with arrows, crossbows with bolts, and stacking darts, throwing knives and stars. Ten materials run from iron through orcish and adamantium to daedric. Fire, frost, shock and poison ammunition is available, arrows and thrown weapons can be taken back from bodies, and blade poisons (venom, bile, paralytic, Marrow-Rot) coat your weapon for a few strikes.
+- **Durability and the Armorer skill.** Weapons and armour wear down with use. Damage and armour rating fall with condition, and broken gear comes off and can't be used until it's repaired. Repair it with armorer's hammers and tongs (the Armorer skill levels by use) or pay a smith.
+- **Legendary artifacts.** Fourteen named artifacts with lore and unique effects, such as Mehrunes' Razor, Goldbrand, Umbra, the Ice Blade of the Monarch, Ebony Mail and the Boots of Blinding Speed. Every Daedric shrine's master carries one, and a few other strong dungeon bosses guard the rest.
 - **Magic.** Destruction, Restoration, Alteration, Illusion, Mysticism and Conjuration spells, including bound weapons, Divine and Almsivi Intervention, Detect Creature, Open Lock, Calm and Paralyze. Racial and birthsign powers can be used once a day. Spell success chance applies.
 - **Factions.** Fighters, Mages and Thieves Guilds, the Temple, the Imperial Legion, the Morag Tong, and Houses Redoran, Hlaalu and Telvanni (you may join only one House). Ten ranks each, gated on reputation and favored skills.
 - **Dialogue.** Disposition, persuasion (admire, intimidate, bribe), barter priced by mercantile skill, training (five sessions per level), spell merchants, temple healing and silt strider travel.

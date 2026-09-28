@@ -1,4 +1,5 @@
-import { WEAPON_BASES, WEAPON_MATERIALS, ARMOR_SLOTS, ARMOR_MATERIALS, POTIONS, POTION_QUALITY, MISC_ITEMS, ENCHANTS, JEWELRY } from "../data/items.js"
+import { WEAPON_BASES, WEAPON_MATERIALS, ARMOR_SLOTS, ARMOR_MATERIALS, POTIONS, POTION_QUALITY, MISC_ITEMS, ENCHANTS, JEWELRY, AMMO, AMMO_ENCHANTS, POISONS, REPAIR_TOOLS } from "../data/items.js"
+import { ARTIFACTS } from "../data/artifacts.js"
 import { SKILLS } from "../data/stats.js"
 
 let uid = 1
@@ -11,7 +12,7 @@ export function reserveItemUids(maxUsed) {
 
 const titleCase = s => s.replace(/\b\w/g, c => c.toUpperCase())
 
-export function makeWeapon(material, base, enchant = null) {
+export function makeWeapon(material, base, enchant = null, qty = 1) {
   const b = WEAPON_BASES[base]
   const m = WEAPON_MATERIALS[material]
   const item = {
@@ -32,7 +33,19 @@ export function makeWeapon(material, base, enchant = null) {
     color: m.color,
     tier: m.tier,
   }
+  if (b.ammo) item.ammo = b.ammo
+  if (b.crossbow) item.crossbow = true
+  if (b.thrown) {
+    // throwing weapons stack like ammunition and don't wear out
+    item.thrown = true
+    item.qty = qty
+    item.stackKey = `thrown:${material}:${base}`
+  } else {
+    item.maxCond = maxCondition(item)
+    item.cond = item.maxCond
+  }
   if (enchant) applyEnchant(item, enchant)
+  if (item.thrown && enchant) item.stackKey += `:${enchant.key}:${enchant.amount}`
   return item
 }
 
@@ -52,6 +65,8 @@ export function makeArmor(material, slot, enchant = null) {
     color: m.color,
     tier: m.tier,
   }
+  item.maxCond = maxCondition(item)
+  item.cond = item.maxCond
   if (enchant) applyEnchant(item, enchant)
   return item
 }
@@ -92,18 +107,167 @@ export function makeMisc(name, qty = 1) {
   }
 }
 
-export function makeArrows(qty, material = "iron") {
-  const mult = { iron: 1, steel: 1.3, glass: 2, ebony: 2.5, daedric: 3 }[material] || 1
-  return {
+const AMMO_MATERIAL_MULT = { iron: 1, chitin: 1, steel: 1.3, silver: 1.5, orcish: 1.7, dwemer: 1.8, adamantium: 1.9, glass: 2, ebony: 2.5, daedric: 3 }
+
+// Arrows or bolts; an enchant key ("fire", "frost", ...) makes them magical.
+export function makeAmmo(type, qty, material = "iron", enchantKey = null) {
+  const a = AMMO[type]
+  const mult = AMMO_MATERIAL_MULT[material] || 1
+  const ench = enchantKey ? AMMO_ENCHANTS[enchantKey] : null
+  const item = {
     uid: nextUid(),
     kind: "ammo",
-    name: `${titleCase(material)} Arrow`,
-    stackKey: `ammo:${material}`,
-    bonus: Math.round(2 * mult),
-    weight: 0.1,
-    value: Math.round(1 * mult),
+    ammoType: type,
+    name: ench ? `${titleCase(material)} ${ench.name} ${a.name}` : `${titleCase(material)} ${a.name}`,
+    stackKey: `ammo:${type}:${material}${ench ? ":" + enchantKey : ""}`,
+    material,
+    bonus: Math.round(a.bonus * mult),
+    weight: type === "bolt" ? 0.15 : 0.1,
+    value: Math.round(a.value * mult * (ench ? 6 : 1)),
     qty,
   }
+  if (ench) item.enchant = { key: enchantKey, element: ench.element, amount: Math.round(ench.amount * (0.8 + mult * 0.3)) }
+  return item
+}
+
+export function makeArrows(qty, material = "iron", enchantKey = null) {
+  return makeAmmo("arrow", qty, material, enchantKey)
+}
+
+export function makeBolts(qty, material = "iron", enchantKey = null) {
+  return makeAmmo("bolt", qty, material, enchantKey)
+}
+
+// The kind of ammunition an item is (old saves stored arrows without a type).
+export const ammoTypeOf = item => item.ammoType || "arrow"
+
+export function makePoison(type, qty = 1) {
+  const p = POISONS[type]
+  return { uid: nextUid(), kind: "poison", name: p.name, stackKey: `poison:${type}`, poison: type, ...pick(p, ["effect", "element", "amount", "duration", "hits", "color"]), weight: 0.5, value: p.value, qty }
+}
+
+export function makeRepairTool(quality = 1) {
+  const t = REPAIR_TOOLS[quality]
+  return { uid: nextUid(), kind: "repair", name: t.name, quality: t.quality, uses: t.uses, maxUses: t.uses, weight: quality === 4 ? 3 : 2, value: t.value }
+}
+
+// A legendary artifact, built from its base item with the overrides applied.
+export function makeArtifact(id) {
+  const a = ARTIFACTS[id]
+  const item = a.kind === "weapon" ? makeWeapon(a.material, a.base) : makeArmor(a.material, a.slot)
+  item.name = a.name
+  item.artifact = id
+  item.lore = a.lore
+  if (a.color) item.color = a.color
+  if (a.damage) item.damage = [...a.damage]
+  if (a.ar) item.ar = a.ar
+  if (a.weight) item.weight = a.weight
+  if (a.enchant) item.enchant = { ...a.enchant, tag: "" }
+  if (a.unique) item.unique = { type: a.unique, chance: a.chance, amount: a.amount }
+  if (a.speedMult) item.speed = Math.round(item.speed * a.speedMult * 100) / 100
+  if (a.indestructible) {
+    item.indestructible = true
+    delete item.cond
+    delete item.maxCond
+  } else {
+    item.maxCond = Math.round(maxCondition(item) * 1.5)
+    item.cond = item.maxCond
+  }
+  item.value = 4000 + (item.tier || 5) * 800
+  item.tier = Math.max(item.tier || 5, 6)
+  return item
+}
+
+function pick(o, keys) {
+  const out = {}
+  for (const k of keys) if (o[k] !== undefined) out[k] = o[k]
+  return out
+}
+
+// ---------- condition (durability) ----------
+
+// Full condition for a weapon or armour piece; better materials last longer.
+export function maxCondition(item) {
+  if (item.kind === "weapon") return Math.round(300 + (item.tier || 1) * 80 + (item.weight || 0) * 2)
+  if (item.kind === "armor" && item.armorClass) return Math.round(100 + (item.tier || 1) * 40 + (item.ar || 0) * 2)
+  return 0
+}
+
+export function hasCondition(item) {
+  return !!item && !item.indestructible && !item.thrown && (item.kind === "weapon" || (item.kind === "armor" && !!item.armorClass))
+}
+
+// Old saves predate condition: treat their gear as new.
+export function ensureCondition(item) {
+  if (hasCondition(item) && item.maxCond === undefined) {
+    item.maxCond = maxCondition(item)
+    item.cond = item.maxCond
+  }
+  return item
+}
+
+export function conditionRatio(item) {
+  if (!hasCondition(item)) return 1
+  ensureCondition(item)
+  return Math.max(0, item.cond) / item.maxCond
+}
+
+export const isBroken = item => hasCondition(item) && conditionRatio(item) <= 0
+
+// Damage scales with a weapon's condition, and armour rating with armour's.
+export const weaponConditionMult = item => (hasCondition(item) ? 0.6 + 0.4 * conditionRatio(item) : 1)
+export const armorConditionMult = item => (hasCondition(item) ? 0.3 + 0.7 * conditionRatio(item) : 1)
+
+// Wear an item down; returns true when this wear broke it.
+export function wear(item, amount) {
+  if (!hasCondition(item) || isBroken(item)) return false
+  ensureCondition(item)
+  item.cond = Math.max(0, item.cond - amount)
+  return item.cond <= 0
+}
+
+// Condition lost per strike (weapons) or per blow taken (armour).
+export const weaponWear = dealt => 1 + dealt / 12
+export const armorWear = taken => 2 + taken / 3
+
+// One use of a hammer or tongs. roll is 0..1 (random). Returns what happened.
+export function repairWithTool(armorer, strength, luck, tool, item, roll = Math.random()) {
+  ensureCondition(item)
+  const chance = Math.min(0.95, 0.3 + ((armorer + strength / 10 + luck / 10) / 100) * tool.quality * 0.7)
+  tool.uses--
+  const toolBroke = tool.uses <= 0
+  if (roll > chance) return { success: false, amount: 0, toolBroke }
+  // a share of the item's full condition, growing with skill and tool quality
+  const amount = Math.max(1, Math.round(item.maxCond * tool.quality * (0.04 + armorer / 400) * (0.8 + roll * 0.4)))
+  const before = item.cond
+  item.cond = Math.min(item.maxCond, item.cond + amount)
+  return { success: true, amount: item.cond - before, toolBroke }
+}
+
+// What a smith charges to restore an item fully.
+export function repairCost(item) {
+  if (!hasCondition(item)) return 0
+  ensureCondition(item)
+  const missing = 1 - item.cond / item.maxCond
+  return missing <= 0 ? 0 : Math.max(2, Math.round(item.value * missing * 0.35 + 3))
+}
+
+// ---------- attack types ----------
+
+export const ATTACK_TYPES = ["chop", "slash", "thrust"]
+
+// Damage range for one attack type, from the weapon's profile.
+export function attackDamage(item, type) {
+  const att = WEAPON_BASES[item.base]?.att || [1, 1, 1]
+  const k = att[Math.max(0, ATTACK_TYPES.indexOf(type))]
+  return [Math.max(1, Math.round(item.damage[0] * k)), Math.max(1, Math.round(item.damage[1] * k))]
+}
+
+// Moving forward thrusts, strafing slashes, standing or backing off chops.
+export function attackTypeFor(forward, strafe) {
+  if (forward > 0.3 && Math.abs(strafe) < forward) return "thrust"
+  if (Math.abs(strafe) > 0.3) return "slash"
+  return "chop"
 }
 
 export function makeLockpick(quality = 1, qty = 1) {
@@ -160,7 +324,17 @@ export function makeItemFromSpec(spec) {
     return makePotion(type, q ? Number(q) : 1)
   }
   if (spec.startsWith("arrows:")) return makeArrows(Number(spec.split(":")[1]))
+  if (spec.startsWith("bolts:")) return makeBolts(Number(spec.split(":")[1]))
+  if (spec.startsWith("poison:")) return makePoison(spec.split(":")[1])
+  if (spec.startsWith("hammer")) return makeRepairTool(Number(spec.split(":")[1] || 1))
   if (spec === "lockpick") return makeLockpick(1)
+  if (spec.includes(":")) {
+    // "iron dart:20": a stack of throwing weapons
+    const [what, n] = spec.split(":")
+    const item = makeItemFromSpec(what)
+    if (item.stackKey) item.qty = Number(n)
+    return item
+  }
   for (const material of Object.keys(ARMOR_MATERIALS).sort((a, b) => b.length - a.length)) {
     if (spec.startsWith(material + " ")) {
       const rest = spec.slice(material.length + 1)
@@ -183,10 +357,27 @@ function pickMaterial(rng, table, tier) {
   return rng.weighted(weighted).k
 }
 
+const THROWN = Object.keys(WEAPON_BASES).filter(k => WEAPON_BASES[k].thrown)
+const HELD = Object.keys(WEAPON_BASES).filter(k => !WEAPON_BASES[k].thrown)
+
 export function randomWeapon(rng, tier, enchantChance = 0) {
   const material = pickMaterial(rng, WEAPON_MATERIALS, tier)
-  const base = rng.pick(Object.keys(WEAPON_BASES))
+  if (rng.chance(0.14)) return makeWeapon(material, rng.pick(THROWN), rng.chance(enchantChance) ? rollEnchant(rng, "weapon", tier) : null, rng.int(6, 20))
+  const base = rng.pick(HELD)
   return makeWeapon(material, base, rng.chance(enchantChance) ? rollEnchant(rng, "weapon", tier) : null)
+}
+
+// Arrows or bolts, sometimes enchanted at higher tiers.
+export function randomAmmo(rng, tier) {
+  const material = rng.pick(["iron", "steel", "silver", "orcish", "dwemer", "glass", "ebony", "daedric"].filter((m, i) => i <= tier + 1))
+  const ench = tier >= 2 && rng.chance(0.15 + tier * 0.05) ? rng.pick(Object.keys(AMMO_ENCHANTS)) : null
+  const n = ench ? rng.int(4, 12) : rng.int(8, 25)
+  return rng.chance(0.6) ? makeArrows(n, material, ench) : makeBolts(n, material, ench)
+}
+
+export function randomPoison(rng, tier) {
+  const options = Object.keys(POISONS).filter(k => POISONS[k].value <= 40 + tier * 30)
+  return makePoison(rng.pick(options.length ? options : ["venom"]), rng.int(1, 2))
 }
 
 export function randomArmor(rng, tier, enchantChance = 0) {
@@ -225,7 +416,13 @@ export function randomLoot(rng, tier, tag = "any", count = null) {
     else if (roll < 0.42) items.push(randomArmor(rng, tier, enchantChance))
     else if (roll < 0.7) items.push(randomPotion(rng, tier))
     else if (roll < 0.9) items.push(randomMisc(rng, tag))
-    else if (roll < 0.95) items.push(rng.chance(0.5) ? makeArrows(rng.int(8, 25), rng.pick(["iron", "steel", "glass"])) : makeLockpick(rng.int(1, Math.min(3, 1 + Math.floor(tier / 3)))))
+    else if (roll < 0.95) {
+      const r = rng.next()
+      if (r < 0.45) items.push(randomAmmo(rng, tier))
+      else if (r < 0.65) items.push(makeLockpick(rng.int(1, Math.min(3, 1 + Math.floor(tier / 3)))))
+      else if (r < 0.85) items.push(randomPoison(rng, tier))
+      else items.push(makeRepairTool(rng.int(1, Math.min(4, 1 + Math.floor(tier / 2)))))
+    }
     else items.push(makeJewelry(rng, tier))
   }
   return items
@@ -233,15 +430,20 @@ export function randomLoot(rng, tier, tag = "any", count = null) {
 
 export function describeItem(item) {
   const lines = []
+  if (item.artifact) lines.push("Legendary artifact")
   if (item.kind === "weapon") {
-    lines.push(`${SKILLS[item.skill].name}${item.twoHanded ? " (two-handed)" : ""}`)
-    lines.push(`Damage ${item.damage[0]}–${item.damage[1]}  Speed ${item.speed}`)
+    lines.push(`${SKILLS[item.skill].name}${item.thrown ? " (thrown)" : item.crossbow ? " (crossbow, bolts)" : item.ranged ? " (bow, arrows)" : item.twoHanded ? " (two-handed)" : ""}`)
+    if (item.ranged || item.thrown) lines.push(`Damage ${item.damage[0]}–${item.damage[1]}  Speed ${item.speed}`)
+    else {
+      lines.push(ATTACK_TYPES.map(t => `${t[0].toUpperCase()}${t.slice(1)} ${attackDamage(item, t).join("–")}`).join(" · "))
+      lines.push(`Speed ${item.speed}  Reach ${item.reach}`)
+    }
     if (item.enchant) lines.push(item.enchant.absorb ? `Absorb Health ${item.enchant.amount} on strike` : `${item.enchant.amount} ${item.enchant.element} damage on strike`)
     if (item.bound) lines.push("Bound (conjured) — vanishes when the spell ends")
   } else if (item.kind === "armor") {
     if (item.armorClass) lines.push(`${SKILLS[item.armorClass].name} · ${item.slot}`)
     else lines.push(`Jewelry · ${item.slot}`)
-    if (item.ar) lines.push(`Armor Rating ${item.ar}`)
+    if (item.ar) lines.push(`Armor Rating ${Math.round(item.ar * armorConditionMult(item))}${hasCondition(item) && conditionRatio(item) < 1 ? ` (${item.ar} when repaired)` : ""}`)
     if (item.enchant) lines.push(item.enchant.resist ? `Resist ${item.enchant.resist} ${Math.round(item.enchant.amount * 100)}%` : `Fortify ${item.enchant.attr} +${item.enchant.amount}`)
   } else if (item.kind === "potion") {
     if (item.effect === "fortify") lines.push(`Fortify ${item.attr} +${item.amount} for ${item.duration}s`)
@@ -251,12 +453,47 @@ export function describeItem(item) {
   } else if (item.kind === "misc" && item.eat) {
     lines.push("Edible: " + Object.entries(item.eat).map(([k, v]) => `${v > 0 ? "+" : ""}${v} ${k}`).join(", "))
   } else if (item.kind === "ammo") {
-    lines.push(`+${item.bonus} damage with bows`)
+    lines.push(`+${item.bonus} damage with ${ammoTypeOf(item) === "bolt" ? "crossbows" : "bows"}`)
+    if (item.enchant) lines.push(`${item.enchant.amount} ${item.enchant.element} damage on hit`)
+  } else if (item.kind === "poison") {
+    lines.push(poisonText(item))
+    lines.push(`Coats your weapon for ${item.hits} strikes. Use it from the inventory.`)
+  } else if (item.kind === "repair") {
+    lines.push(`Repairs weapons and armour (Armorer). Quality ×${item.quality}`)
+    lines.push(`Uses left ${item.uses}/${item.maxUses}`)
   } else if (item.kind === "lockpick") {
     lines.push(`Lockpicking quality ×${item.mult}`)
   } else if (item.kind === "quest") {
     lines.push("Quest item")
   }
+  if (item.unique) lines.push(uniqueText(item.unique))
+  if (item.indestructible) lines.push("Never wears out")
+  else if (hasCondition(item)) {
+    ensureCondition(item)
+    lines.push(`Condition ${Math.ceil(item.cond)}/${item.maxCond}${isBroken(item) ? " — broken" : ""}`)
+  }
   lines.push(`Weight ${item.weight}  Value ${item.value}`)
+  if (item.lore) lines.push(item.lore)
   return lines
+}
+
+export function poisonText(p) {
+  if (p.effect === "dot") return `${p.amount} ${p.element} damage per second for ${p.duration}s`
+  if (p.effect === "paralyze") return `Paralyzes for ${p.duration}s`
+  if (p.effect === "weaken") return `Weakens the target's attacks by ${Math.round(p.amount * 100)}% for ${p.duration}s`
+  return ""
+}
+
+function uniqueText(u) {
+  return {
+    banish: `${Math.round(u.chance * 100)}% chance to slay a lesser foe outright`,
+    paralyze: `${Math.round(u.chance * 100)}% chance to paralyze on strike`,
+    stagger: "Every blow staggers",
+    absorbMagicka: `Absorb ${u.amount} magicka on strike`,
+    absorbFatigue: `Absorb ${u.amount} fatigue on strike`,
+    regen: `Restore ${u.amount} health per second while worn`,
+    fireShield: `Burns melee attackers for ${u.amount}`,
+    blinding: "Greatly fortifies speed, but blinds: your attacks miss more",
+    shadow: `Chameleon ${Math.round(u.amount * 100)}% while equipped`,
+  }[u.type] || ""
 }
