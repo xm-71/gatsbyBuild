@@ -1,0 +1,234 @@
+import { test } from "node:test"
+import assert from "node:assert/strict"
+import { RNG } from "../src/core/rng.js"
+import { generateWorld, SEA_LEVEL } from "../src/logic/worldgen.js"
+import { generateDungeonLevel, bfsDistances, FLOOR } from "../src/logic/dungeongen.js"
+import { createCharacter, exerciseSkill, levelUp, canLevelUp, maxHealth, attrMultiplier } from "../src/logic/character.js"
+import { RACES, CLASSES, BIRTHSIGNS } from "../src/data/stats.js"
+import { randomLoot, makeItemFromSpec } from "../src/logic/items.js"
+import { generateQuest, canPromote } from "../src/logic/quests.js"
+import { hitChance, applyArmor } from "../src/logic/combat.js"
+
+test("rng is deterministic per seed", () => {
+  const a = new RNG("seed")
+  const b = new RNG("seed")
+  for (let i = 0; i < 10; i++) assert.equal(a.next(), b.next())
+})
+
+test("world generation is deterministic and populated", () => {
+  const w1 = generateWorld("test-1")
+  const w2 = generateWorld("test-1")
+  assert.equal(w1.towns.length, w2.towns.length)
+  assert.deepEqual(w1.towns.map(t => t.name), w2.towns.map(t => t.name))
+  assert.ok(w1.towns.length >= 4, `expected several towns, got ${w1.towns.length}`)
+  assert.ok(w1.dungeons.length >= 10, `expected many dungeons, got ${w1.dungeons.length}`)
+  assert.ok(w1.startTown.start)
+  for (const t of w1.towns) assert.ok(w1.heightAt(t.x, t.z) > SEA_LEVEL, `${t.name} is underwater`)
+  assert.equal(w1.mainQuest.relics.length, 3)
+  assert.ok(w1.dungeons.find(d => d.citadel))
+  assert.ok(w1.flora.length > 500)
+})
+
+test("different seeds give different worlds", () => {
+  const a = generateWorld("alpha")
+  const b = generateWorld("beta")
+  assert.notDeepEqual(a.towns.map(t => t.name), b.towns.map(t => t.name))
+})
+
+for (const type of ["cave", "tomb", "dwemer", "daedric", "citadel"]) {
+  test(`dungeon ${type} levels are connected`, () => {
+    for (let level = 0; level < 3; level++) {
+      const lvl = generateDungeonLevel({ seed: 42 + level, type, tier: 3, level, levels: 3, citadel: type === "citadel" })
+      const dist = bfsDistances(lvl.grid, lvl.w, lvl.h, lvl.entry)
+      assert.equal(lvl.grid[lvl.entry.y * lvl.w + lvl.entry.x], FLOOR)
+      if (lvl.stairsDown) assert.ok(dist[lvl.stairsDown.y * lvl.w + lvl.stairsDown.x] > 0, "stairs reachable")
+      for (const s of lvl.spawns) assert.ok(dist[s.y * lvl.w + s.x] >= 0, "spawn reachable")
+      if (lvl.isBottom) assert.ok(lvl.spawns.some(s => s.boss))
+    }
+  })
+}
+
+test("every race/class/sign combination creates a valid character", () => {
+  for (const race of Object.keys(RACES))
+    for (const cls of Object.keys(CLASSES))
+      for (const sign of Object.keys(BIRTHSIGNS)) {
+        const c = createCharacter({ name: "T", race, cls, sign })
+        assert.ok(c.health > 0 && c.magicka >= 0 && c.fatigue > 0)
+        assert.ok(Object.values(c.skills).every(v => v >= 5 && v <= 100))
+      }
+})
+
+test("skills level by use and grant levels", () => {
+  const c = createCharacter({ name: "T", race: "nord", cls: "warrior", sign: "warrior" })
+  const before = c.skills.longBlade
+  let ready = false
+  for (let i = 0; i < 4000 && !ready; i++) {
+    const ev = exerciseSkill(c, "longBlade", 1)
+    if (ev.some(e => e.type === "levelReady")) ready = true
+  }
+  assert.ok(c.skills.longBlade >= before + 10)
+  assert.ok(canLevelUp(c))
+  assert.equal(attrMultiplier(c, "strength"), 5)
+  const hp = maxHealth(c)
+  const str = c.attrs.strength
+  assert.ok(levelUp(c, ["strength", "endurance", "agility"]))
+  assert.equal(c.level, 2)
+  assert.equal(c.attrs.strength, Math.min(100, str + 5))
+  assert.ok(maxHealth(c) > hp)
+})
+
+test("loot and item specs", () => {
+  const rng = new RNG(5)
+  for (let tier = 1; tier <= 7; tier++) {
+    const loot = randomLoot(rng, tier, "tomb", 6)
+    assert.equal(loot.length, 6)
+    for (const it of loot) assert.ok(it.name && it.value >= 0)
+  }
+  for (const cls of Object.values(CLASSES)) for (const spec of cls.kit) assert.ok(makeItemFromSpec(spec))
+})
+
+test("quests target real places", () => {
+  const world = generateWorld("quests")
+  const rng = new RNG(9)
+  const npc = world.startTown.npcs[0]
+  for (let i = 0; i < 20; i++) {
+    const q = generateQuest(rng, world, npc, "fightersGuild", 3)
+    assert.ok(q.title && q.desc)
+    if (q.dungeonId !== undefined) assert.ok(world.dungeons[q.dungeonId])
+  }
+  const c = createCharacter({ name: "T", race: "dunmer", cls: "mage", sign: "mage" })
+  assert.equal(canPromote(c, "magesGuild").ok, false)
+})
+
+test("combat formulas stay in range", () => {
+  assert.ok(hitChance({ skill: 5, agility: 10, luck: 10, fatigue: 0 }, 100) >= 0.08)
+  assert.ok(hitChance({ skill: 100, agility: 100, luck: 100, fatigue: 1 }, 0) <= 0.98)
+  assert.ok(applyArmor(10, 1000) >= 2.5)
+})
+
+test("quick-slots start filled and follow stacks", async () => {
+  const { assignQuickslot, itemForSlot, slotForItem, removeItem, addItem } = await import("../src/logic/character.js")
+  const { makePotion } = await import("../src/logic/items.js")
+  const c = createCharacter({ name: "T", race: "breton", cls: "mage", sign: "mage" })
+  assert.equal(c.quickslots.length, 9)
+  assert.equal(c.quickslots[0].type, "spell")
+  const potion = c.inventory.find(i => i.kind === "potion")
+  assignQuickslot(c, 8, slotForItem(potion))
+  assert.equal(c.quickslots.filter(s => s && s.stackKey === potion.stackKey).length, 1, "an item lives in one slot only")
+  removeItem(c, potion, potion.qty)
+  assert.equal(itemForSlot(c, c.quickslots[8]), null)
+  const fresh = makePotion(potion.potion, 1)
+  addItem(c, fresh)
+  assert.equal(itemForSlot(c, c.quickslots[8]), fresh, "a new stack of the same potion refills the slot")
+})
+
+test("music: moods, keys and the main theme", async () => {
+  const { pickMood, generatePhrase, degreeToMidi, MAIN_THEME, PRESETS } = await import("../src/logic/musictheory.js")
+  assert.equal(pickMood({ mode: "title" }).key, "title")
+  assert.equal(pickMood({ mode: "play", area: "overworld", region: "ashlands" }).key, "ashlands")
+  assert.equal(pickMood({ mode: "play", area: "overworld", region: "ashlands", inTown: true }).key, "town")
+  assert.equal(pickMood({ mode: "play", area: "dungeon", theme: "dwemer" }).key, "dwemer")
+  const calm = pickMood({ mode: "play", region: "grazelands" })
+  const fight = pickMood({ mode: "play", region: "grazelands", combat: 1 })
+  assert.equal(calm.layers.drums, 0)
+  assert.ok(fight.layers.drums > 0.9 && fight.bpm > calm.bpm)
+  assert.ok(pickMood({ mode: "play", area: "dungeon", theme: "citadel", combat: 1, boss: true }).layers.choir > 0.5)
+  // D dorian: degree 0 is D, degree 4 is A, degree 7 is the octave
+  assert.equal(degreeToMidi(38, "dorian", 0), 38)
+  assert.equal(degreeToMidi(38, "dorian", 4), 45)
+  assert.equal(degreeToMidi(38, "dorian", 7), 50)
+  assert.equal(degreeToMidi(38, "dorian", -1), 36)
+  // the theme is 32 beats (8 bars of 4/4)
+  assert.equal(MAIN_THEME.reduce((a, [, b]) => a + b, 0), 32)
+  for (const key of Object.keys(PRESETS)) {
+    const a = generatePhrase(7, key, 3, PRESETS[key].density)
+    assert.deepEqual(a, generatePhrase(7, key, 3, PRESETS[key].density))
+    assert.equal(a.length, 4)
+    for (const bar of a) for (const n of bar.notes) assert.ok(n.beat >= 0 && n.beat + n.beats <= 4.001)
+  }
+})
+
+test("audio helpers: body materials, weapon classes, greeting lines", async () => {
+  const { bodyMaterial, weaponClass } = await import("../src/audio/sfx.js")
+  const { CREATURES } = await import("../src/data/creatures.js")
+  const { greetingLine } = await import("../src/audio/voice.js")
+  assert.equal(bodyMaterial(CREATURES.skeleton), "bone")
+  assert.equal(bodyMaterial(CREATURES.centurionSphere), "metal")
+  assert.equal(bodyMaterial(CREATURES.mudcrab), "chitin")
+  assert.equal(bodyMaterial(CREATURES.ancestorGhost), "ghost")
+  assert.equal(bodyMaterial(CREATURES.kagouti), "flesh")
+  assert.equal(weaponClass(null), "fist")
+  assert.equal(weaponClass({ skill: "bluntWeapon" }), "blunt")
+  assert.equal(greetingLine("What do you want, n'wah? Go away."), "What do you want, n'wah?")
+})
+
+test("weapons: attack types, thrown stacks, ammo types and artifacts", async () => {
+  const I = await import("../src/logic/items.js")
+  const { ARTIFACT_IDS } = await import("../src/data/artifacts.js")
+  const { WEAPON_BASES } = await import("../src/data/items.js")
+  assert.equal(I.attackTypeFor(1, 0), "thrust")
+  assert.equal(I.attackTypeFor(0, 1), "slash")
+  assert.equal(I.attackTypeFor(0, 0), "chop")
+  assert.equal(I.attackTypeFor(-1, 0), "chop")
+  const spear = I.makeWeapon("steel", "spear")
+  assert.ok(I.attackDamage(spear, "thrust")[1] > I.attackDamage(spear, "chop")[1] * 2)
+  const axe = I.makeWeapon("iron", "war axe")
+  assert.ok(I.attackDamage(axe, "chop")[1] > I.attackDamage(axe, "thrust")[1] * 3)
+  for (const base of Object.keys(WEAPON_BASES)) assert.ok(I.makeWeapon("iron", base).damage[1] > 0, base)
+  const darts = I.makeWeapon("iron", "dart", null, 12)
+  assert.equal(darts.qty, 12)
+  assert.ok(darts.stackKey && !I.hasCondition(darts))
+  assert.equal(I.makeWeapon("steel", "crossbow").ammo, "bolt")
+  assert.equal(I.ammoTypeOf(I.makeBolts(5)), "bolt")
+  assert.equal(I.ammoTypeOf({ kind: "ammo" }), "arrow") // old saves
+  const fire = I.makeArrows(5, "glass", "fire")
+  assert.equal(fire.enchant.element, "fire")
+  assert.notEqual(fire.stackKey, I.makeArrows(5, "glass").stackKey)
+  assert.equal(I.makeItemFromSpec("steel throwing knife:15").qty, 15)
+  for (const id of ARTIFACT_IDS) {
+    const a = I.makeArtifact(id)
+    assert.ok(a.name && a.lore && a.artifact === id, id)
+  }
+  assert.ok(I.makeArtifact("goldbrand").indestructible)
+})
+
+test("durability: wear, breaking, repair and smith cost", async () => {
+  const I = await import("../src/logic/items.js")
+  const C = await import("../src/logic/character.js")
+  const c = C.createCharacter({ name: "T", race: "nord", cls: "warrior", sign: "warrior" })
+  assert.equal(C.getSkill(c, "armorer") >= 5, true)
+  const sw = I.makeWeapon("iron", "longsword")
+  assert.equal(sw.cond, sw.maxCond)
+  assert.equal(I.weaponConditionMult(sw), 1)
+  I.wear(sw, sw.maxCond / 2)
+  assert.ok(I.weaponConditionMult(sw) < 1 && I.weaponConditionMult(sw) > 0.6)
+  assert.ok(I.repairCost(sw) > 0)
+  assert.equal(I.wear(sw, 1e6), true)
+  assert.ok(I.isBroken(sw))
+  C.addItem(c, sw)
+  assert.equal(C.equip(c, sw), false) // broken gear can't be equipped
+  const tool = I.makeRepairTool(3)
+  const r = I.repairWithTool(60, 60, 50, tool, sw, 0.1)
+  assert.ok(r.success && r.amount > 0 && !I.isBroken(sw))
+  assert.equal(tool.uses, tool.maxUses - 1)
+  // armour rating falls with condition
+  const cu = I.makeArmor("steel", "cuirass")
+  C.addItem(c, cu)
+  C.equip(c, cu)
+  const full = C.armorRating(c)
+  I.wear(cu, cu.maxCond * 0.8)
+  assert.ok(C.armorRating(c) < full)
+  // old-save items without condition are treated as new
+  const old = { kind: "weapon", base: "dagger", tier: 1, weight: 3, damage: [3, 7] }
+  I.ensureCondition(old)
+  assert.equal(old.cond, old.maxCond)
+})
+
+test("worlds hide legendary artifacts with dungeon bosses", () => {
+  const w = generateWorld("artifact-test")
+  const held = w.dungeons.filter(d => d.artifact)
+  assert.ok(held.length >= 4)
+  assert.equal(new Set(held.map(d => d.artifact)).size, held.length)
+  for (const d of w.dungeons.filter(d => d.type === "daedric")) assert.ok(d.artifact, "every Daedric shrine has one")
+  assert.deepEqual(generateWorld("artifact-test").dungeons.map(d => d.artifact), w.dungeons.map(d => d.artifact))
+})

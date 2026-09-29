@@ -1,0 +1,997 @@
+import * as THREE from "three"
+import { RNG } from "../core/rng.js"
+import { relicDescription, SEA_LEVEL, REGIONS } from "../logic/worldgen.js"
+import { generateDungeonLevel, DUNGEON_THEMES } from "../logic/dungeongen.js"
+import { createCharacter, getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, armorRating, resistance, exerciseSkill, addItem, hasEffect, effectAmount, tickEffects, equip, removeItem, fatigueRatio } from "../logic/character.js"
+import { applyArmor, blockChance, evasionOf } from "../logic/combat.js"
+import { randomLoot, makeMisc, makeWeapon, makeArmor, makeQuestItem, randomPotion } from "../logic/items.js"
+import { bossName } from "../logic/names.js"
+import { CREATURES } from "../data/creatures.js"
+import { RACES, BIRTHSIGNS, SKILLS } from "../data/stats.js"
+import { getSpell } from "../data/spells.js"
+import { OverworldArea, DungeonArea, InteriorArea } from "./areas.js"
+import { Projectile, ELEMENT_COLOR } from "./actors.js"
+import { Input } from "./input.js"
+import { Audio } from "./audio.js"
+import { ViewModel } from "../render/viewmodel.js"
+import { updatePlayer, spellEffectsOnEnemy } from "./player.js"
+import { UI } from "../ui/ui.js"
+import { loadWorld } from "./worldLoader.js"
+import { writeSave, deleteSave, restoreRun } from "./save.js"
+import { strikeEnemy, wearArmor } from "./combat.js"
+import { Particles } from "../render/particles.js"
+import { makeArtifact } from "../logic/items.js"
+import { equippedUnique } from "../logic/character.js"
+import { ARTIFACTS } from "../data/artifacts.js"
+import { showLoading, hideLoading } from "../ui/loading.js"
+import { Q } from "../core/quality.js"
+import { onSettingsChange } from "../core/settings.js"
+import { PostFX } from "../render/post.js"
+import { GamepadInput } from "./gamepad.js"
+import { TouchControls } from "../ui/touch.js"
+import { settings } from "../core/settings.js"
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
+
+const HOURS_PER_SECOND = 2 / 60 // one real second = two game minutes
+
+export class Game {
+  constructor(container) {
+    this.container = container
+    this.renderer = new THREE.WebGLRenderer({ antialias: Q.antialias, powerPreference: "high-performance" })
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, Q.pixelRatio))
+    this.renderer.setSize(window.innerWidth, window.innerHeight)
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+    this.renderer.toneMappingExposure = 1.25
+    Q.maxAniso = Math.min(8, this.renderer.capabilities.getMaxAnisotropy())
+    this.renderer.shadowMap.enabled = Q.shadows
+    this.renderer.shadowMap.type = THREE.PCFShadowMap
+    container.appendChild(this.renderer.domElement)
+    // a neutral studio environment so metals (weapons, armour, Dwemer brass) have something to reflect
+    const pmrem = new THREE.PMREMGenerator(this.renderer)
+    this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.05, 2000)
+    this.camera.rotation.order = "YXZ"
+    this.viewmodel = new ViewModel(this.camera)
+    this.playerLight = new THREE.PointLight(0xffd8a0, 0, 16, 1.6)
+    this.camera.add(this.playerLight)
+    this.post = new PostFX(this.renderer, { ...Q.post, samples: Q.antialias ? 4 : 0 })
+    this.input = new Input(this.renderer.domElement)
+    this.audio = new Audio()
+    this.ui = new UI(this)
+    this.gamepad = new GamepadInput(this)
+    this.touch = new TouchControls(this)
+    onSettingsChange(s => {
+      this.input.sensitivity = 0.0022 * s.sensitivity
+      this.camera.fov = s.fov
+      this.camera.updateProjectionMatrix()
+      this.audio.applyVolumes()
+      this.post.off = s.postfx === false
+    })
+    this.mode = "title"
+    this.timer = new THREE.Timer()
+    this.projectiles = []
+    this.flashes = []
+    this.particles = new Particles()
+    this.daylight = 1
+    this.titleT = 0
+    window.addEventListener("resize", () => this.resize())
+    document.addEventListener("visibilitychange", () => document.hidden && this.autosave())
+    window.addEventListener("pagehide", () => this.autosave())
+    // browsers only allow sound after a gesture: start it on the first one anywhere
+    for (const ev of ["pointerdown", "keydown"]) window.addEventListener(ev, () => this.audio.ensure(), { capture: true })
+    this.renderer.domElement.addEventListener("click", () => {
+      this.audio.ensure()
+      if (this.mode === "play" && !this.ui.modal) this.input.lock()
+    })
+    this.renderer.setAnimationLoop(() => this.frame())
+  }
+
+  resize() {
+    this.camera.aspect = window.innerWidth / window.innerHeight
+    this.camera.updateProjectionMatrix()
+    this.renderer.setSize(window.innerWidth, window.innerHeight)
+    this.post.setSize()
+  }
+
+  // Generate (or reuse) a world for the given seed. The title screen flies over it.
+  // The island is generated in a worker and the 3D world built in steps, so the
+  // page keeps painting a progress bar instead of freezing.
+  async prepareWorld(seed, onProgress = (p, text) => showLoading(text, p), force = false) {
+    if (!force && this.world && this.world.seed === seed && this.overworld) return
+    this.loadingWorld = true
+    const token = (this.worldToken = (this.worldToken || 0) + 1)
+    onProgress(0, "Raising Vvardenfell from the sea…")
+    const { world, chunks } = await loadWorld(seed, () => onProgress(0.15, "Shaping the land…"))
+    if (token !== this.worldToken) return // a newer seed was requested meanwhile
+    const overworld = await OverworldArea.create(this, world, chunks, (p, text) => onProgress(0.25 + p * 0.65, text ? `${text}…` : "Lighting the lanterns…"))
+    if (token !== this.worldToken) return
+    if (this.overworld) this.overworld.scene.clear()
+    this.seed = seed
+    this.world = world
+    this.overworld = overworld
+    this.setArea(this.overworld)
+    this.projectiles = []
+    onProgress(0.92, "Lighting the lanterns…")
+    try {
+      await Promise.race([this.renderer.compileAsync(this.overworld.scene, this.camera), new Promise(r => setTimeout(r, 8000))])
+    } catch {
+      /* shaders compile on first draw instead */
+    }
+    // warm up the post-processing targets and shaders behind the loading screen
+    this.post.render(this.overworld.scene, this.camera)
+    this.loadingWorld = false
+    onProgress(1, "")
+  }
+
+  async ensureWorld(seed) {
+    if (seed !== this.seed || this.runStarted) {
+      // a finished run mutated its world, so regenerate even for the same seed
+      await this.prepareWorld(seed, undefined, true)
+      hideLoading()
+    }
+    this.runStarted = true
+    this.rng = new RNG(`run:${seed}`)
+  }
+
+  newPlayerController(x, y, z, yaw) {
+    return {
+      pos: new THREE.Vector3(x, y, z),
+      vel: new THREE.Vector3(),
+      yaw,
+      pitch: 0,
+      onGround: true,
+      sneaking: false,
+      swimming: false,
+      charging: false,
+      chargeT: 0,
+      attackCd: 0,
+      pendingHit: null,
+      castCd: 0,
+      stepT: 0,
+      hurtFlash: 0,
+    }
+  }
+
+  beginPlay() {
+    this.lastTarget = null
+    this.lastTargetT = 0
+    this.saveT = 0
+    this.mode = "play"
+    this.ui.hideScreens()
+    this.ui.showHud()
+  }
+
+  // Continue a suspended run from its save.
+  async resumeRun(save) {
+    this.audio.ensure()
+    await this.ensureWorld(save.seed)
+    restoreRun(this, save)
+    for (const [k, st] of Object.entries(this.landmarks.state)) if (k[0] === "c" && st.opened) this.overworld.seabed?.userData.open(Number(k.slice(1)))
+    this.viewmodel.setSkin(RACES[this.char.race].skin)
+    this.pc = this.newPlayerController(save.pc.x, save.pc.y, save.pc.z, save.pc.yaw)
+    this.pc.pitch = save.pc.pitch || 0
+    this.pc.sneaking = !!save.pc.sneaking
+    this.setArea(this.overworld)
+    if (save.area.kind === "dungeon") {
+      const d = this.world.dungeons[save.area.id]
+      this.returnPos = save.area.returnPos
+      this.loadDungeonLevel(d, save.area.level, false, true)
+      this.pc.pos.set(save.pc.x, save.pc.y, save.pc.z)
+    } else if (save.area.kind === "interior") {
+      this.enterInterior(save.area.town, save.area.building, true)
+      this.returnPos = save.area.returnPos
+      this.pc.pos.set(save.pc.x, save.pc.y, save.pc.z)
+    }
+    this.beginPlay()
+    this.msg(`Welcome back, ${this.char.name}. Day ${Math.floor(this.time / 24) + 1}.`, "#f0d890")
+  }
+
+  // Write the suspend save (only while a run is in progress).
+  autosave() {
+    if (this.mode !== "play" || !this.char || this.char.dead) return
+    this.saveT = 0
+    writeSave(this)
+  }
+
+  async startRun({ name, race, cls, sign, seed }) {
+    this.audio.ensure()
+    await this.ensureWorld(seed)
+    deleteSave()
+    this.char = createCharacter({ name, race, cls, sign })
+    this.char.dead = false
+    this.viewmodel.setSkin(RACES[race].skin)
+    this.time = 9 // day 0, 9am
+    this.day = 0
+    this.weather = "clear"
+    this.weatherT = 3
+    this.quests = []
+    this.journal = []
+    this.dungeonState = {}
+    this.main = { stage: 0 }
+    this.knownTowns = new Set([this.world.startTown.id])
+    this.landmarks = { found: [], state: {} } // discovered landmarks, their chests and garrisons
+    this.isle = { stage: 0 } // the frozen isle's story
+    this.trainedThisLevel = 0
+    this.merchantStock = new Map()
+    this.dispositionMod = new Map()
+    const t = this.world.startTown
+    const a = t.port.angle
+    this.pc = this.newPlayerController(t.x + Math.cos(a) * (t.radius * 0.45), t.y, t.z + Math.sin(a) * (t.radius * 0.45), Math.atan2(Math.cos(a), Math.sin(a)))
+    this.setArea(this.overworld)
+    this.beginPlay()
+    const blade = t.npcs.find(n => n.role === "blade")
+    this.addJournal(`I have arrived in ${t.name} in the ${REGIONS[t.region].name} of Vvardenfell, a free ${RACES[race].name}. ${blade ? `An Imperial named ${blade.name} of the Blades wishes to speak with me in the town square.` : ""}`)
+    this.msg(`Welcome to ${t.name}, outlander. Seed: ${seed}`, "#f0d890")
+    this.msg("Click to look around. WASD move · LMB attack · F cast · E activate · Tab menu", "#c9b88f")
+    if (blade) this.msg(`${blade.name} of the Blades is waiting to speak with you.`, "#c9b88f")
+    this.autosave()
+  }
+
+  setArea(area) {
+    for (const p of this.projectiles) p.destroy()
+    this.projectiles = []
+    this.area = area
+    area.scene.environment = this.envMap
+    area.scene.environmentIntensity = area.kind === "overworld" ? 0.6 : 0.25
+    area.scene.add(this.camera)
+    this.particles.attach(area.scene)
+    area.scene.updateMatrixWorld()
+    this.audio.enterArea(area)
+  }
+
+  // ---------- time & weather ----------
+
+  isNight() {
+    const h = this.time % 24
+    return h < 5.5 || h > 20
+  }
+
+  hourOfDay() {
+    return this.time % 24
+  }
+
+  advanceTime(hours) {
+    const before = Math.floor(this.time / 24)
+    this.time += hours
+    const after = Math.floor(this.time / 24)
+    if (after !== before) {
+      this.char.powersUsed = {}
+      this.day = after
+    }
+  }
+
+  updateWeather(dt) {
+    this.weatherT -= dt * HOURS_PER_SECOND
+    if (this.weatherT > 0) return
+    this.weatherT = 3 + Math.random() * 4
+    const region = this.world.regionAt(this.pc.pos.x, this.pc.pos.z)
+    const R = { ashlands: 0.35, redMountain: 0.6, molagAmur: 0.4 }[region] || 0
+    const r = Math.random()
+    let w = "clear"
+    if (region === "frostholm") {
+      // the frozen isle: snow, blizzards, and the odd clear cold day
+      w = r < 0.4 ? "snow" : r < 0.55 ? "blizzard" : r < 0.72 ? "cloudy" : r < 0.8 ? "fog" : "clear"
+    } else if (r < R) w = region === "redMountain" && Math.random() < 0.3 ? "blight" : "ash"
+    else if (r < R + (["bitterCoast", "ascadian", "westGash"].includes(region) ? 0.25 : 0.08)) w = Math.random() < 0.35 ? "storm" : "rain"
+    else if (r < R + 0.35) w = "cloudy"
+    else if (r < R + 0.42) w = "fog"
+    if (w !== this.weather) {
+      this.weather = w
+      const txt = { ash: "An ash storm is blowing in.", blight: "A blight storm rolls off Red Mountain!", rain: "It begins to rain.", storm: "Thunder rumbles. A storm is coming.", snow: "Snow begins to fall.", blizzard: "A blizzard howls in off the sea!", fog: "Fog settles over the land.", cloudy: "Clouds gather.", clear: "The sky clears." }[w]
+      if (this.area.kind === "overworld") this.msg(txt, "#b0a890")
+    }
+  }
+
+  // ---------- main loop ----------
+
+  frame() {
+    this.timer.update()
+    if (!this.overworld || !this.area || !this.world) return
+    const dt = Math.min(0.05, this.timer.getDelta())
+    this.gamepad.poll(dt)
+    this.touch.update(dt)
+    if (this.mode === "title" || this.mode === "chargen") this.updateTitle(dt)
+    else if (this.mode === "play") {
+      if (this.ui.modal === "dialogue" && this.ui.dialogueNpc) this.updateTalkCamera(dt)
+      if (!this.ui.modal && this.input.active) this.update(dt)
+      else if (!this.ui.modal && !this.input.active) this.ui.showPauseHint(true)
+      this.ui.updateHud()
+    } else if (this.mode === "dead" || this.mode === "victory") {
+      this.pc.pitch = Math.min(this.pc.pitch + dt * 0.3, 0.2)
+      this.camera.position.y = Math.max(this.camera.position.y - dt * 1.2, this.pc.pos.y + 0.3)
+      this.camera.rotation.z = Math.min(this.camera.rotation.z + dt * 0.5, this.mode === "dead" ? 0.9 : 0)
+      if (this.area.kind === "overworld") this.area.sky.update(dt, this.hourOfDay(), this.camera, this.area.fogColor(this.pc.pos.x, this.pc.pos.z), this.area.scene.fog)
+      for (const e of this.area.enemies) e.update(dt)
+    }
+    this.viewmodel.root.visible = this.mode === "play" && this.ui.modal !== "dialogue"
+    this.audio.update(dt, this)
+    if (this.input.active) this.ui.showPauseHint(false)
+    this.input.endFrame()
+    this.updatePost(dt)
+    this.post.render(this.area.scene, this.camera)
+  }
+
+  // Conversation close-up: glide the camera to the speaker's face, framed on
+  // the left so the dialogue sits beside it; the speaker blinks and talks.
+  startTalkCamera(npc) {
+    this.talkCam = { t: 0, from: this.camera.position.clone(), fromQ: this.camera.quaternion.clone() }
+    npc.talkUntil = 0
+  }
+
+  updateTalkCamera(dt) {
+    const npc = this.ui.dialogueNpc
+    const tc = this.talkCam
+    const head = npc.rig?.head
+    npc.talking = performance.now() / 1000 < (npc.talkUntil || 0)
+    npc.update(dt, npc)
+    if (!tc || !head) return
+    tc.t = Math.min(1, tc.t + dt * 1.6)
+    const k = tc.t * tc.t * (3 - 2 * tc.t)
+    npc.mesh.updateMatrixWorld(true)
+    const face = head.localToWorld(new THREE.Vector3(0, 0.15, 0.02))
+    const fwd = new THREE.Vector3(Math.sin(npc.yaw), 0, Math.cos(npc.yaw))
+    const side = new THREE.Vector3(Math.cos(npc.yaw), 0, -Math.sin(npc.yaw))
+    const narrow = window.innerWidth < 760
+    const aspect = window.innerWidth / window.innerHeight
+    const pos = face.clone().addScaledVector(fwd, narrow ? 1.15 : 0.85).add(new THREE.Vector3(0, 0.02, 0))
+    // shift the aim so the face sits in the left third, clear of the dialogue
+    const look = narrow ? face.clone().add(new THREE.Vector3(0, -0.14, 0)) : face.clone().addScaledVector(side, 0.3 * Math.min(1.6, aspect / 1.5)).add(new THREE.Vector3(0, -0.04, 0))
+    const m = new THREE.Matrix4().lookAt(pos, look, new THREE.Vector3(0, 1, 0))
+    const q = new THREE.Quaternion().setFromRotationMatrix(m)
+    this.camera.position.lerpVectors(tc.from, pos, k)
+    this.camera.quaternion.slerpQuaternions(tc.fromQ, q, k)
+  }
+
+  // Feed the post-processing: ambient occlusion strength, where the sun is on
+  // screen and how strong its shafts are, and whether the camera is underwater.
+  updatePost(dt) {
+    const s = this.post.state
+    if (!s) return
+    s.time += dt
+    const cam = this.camera
+    const camPos = cam.getWorldPosition(new THREE.Vector3())
+    s.ao = this.area.kind === "overworld" ? 0.85 : 1
+    s.bloom = this.area.kind === "dungeon" ? 0.2 : this.area.kind === "interior" ? 0.25 : 0.35
+    s.under = this.area.kind === "overworld" && camPos.y < SEA_LEVEL - 0.05 ? 1 : 0
+    s.sunAmt = 0
+    if (this.area.kind !== "overworld" || s.under) return
+    const sky = this.area.sky
+    const dir = sky.skyUniforms.sunDir.value
+    const fwd = cam.getWorldDirection(new THREE.Vector3())
+    const facing = fwd.dot(dir)
+    if (dir.y < -0.05 || facing < 0.1) return
+    const p = camPos.clone().addScaledVector(dir, 1000).project(cam)
+    s.sun.set(p.x * 0.5 + 0.5, p.y * 0.5 + 0.5)
+    const w = this.mode === "title" ? "clear" : this.weather
+    const low = 1 - Math.min(1, dir.y / 0.45) // dawn and dusk
+    const storm = w === "ash" || w === "blight"
+    let amt = 0.18 + low * 0.45
+    if (storm) amt = 0.55
+    else if (w === "fog") amt = 0.4
+    else if (w === "rain" || w === "cloudy") amt *= 0.4
+    s.sunAmt = amt * Math.min(1, (facing - 0.1) / 0.4) * Math.min(1, (dir.y + 0.05) / 0.15)
+    s.sunColor.setRGB(1, 0.78 - low * 0.18, 0.55 - low * 0.25)
+    if (storm) s.sunColor.set(w === "blight" ? 0xd06040 : 0xc09060)
+  }
+
+  updateTitle(dt) {
+    this.titleT += dt * 0.03
+    const rm = this.world.redMountain
+    const r = 330
+    this.camera.position.set(rm.x + Math.cos(this.titleT) * r, 120, rm.z + Math.sin(this.titleT) * r)
+    this.camera.lookAt(rm.x, 40, rm.z)
+    this.camera.rotation.order = "YXZ"
+    const hour = 17.2
+    this.overworld.sky.weather = "clear"
+    this.overworld.sky.update(dt, hour, this.camera, 0xb09a88, this.overworld.scene.fog)
+    this.overworld.scene.fog.far = 900
+    this.overworld.scene.fog.near = 200
+    this.overworld.animate(dt)
+    this.overworld.scene.background = this.overworld.sky.skyColor
+    this.viewmodel.root.visible = false
+  }
+
+  update(dt) {
+    const c = this.char
+    this.advanceTime(dt * HOURS_PER_SECOND)
+    this.viewmodel.root.visible = true
+    if (this.area.kind === "overworld") {
+      this.updateWeather(dt)
+      this.area.sky.weather = this.weather
+      const rmd = Math.hypot(this.pc.pos.x - this.world.redMountain.x, this.pc.pos.z - this.world.redMountain.z)
+      const redness = Math.max(0, Math.min(1, (320 - rmd) / 170))
+      if (!this.area.sky.onThunder) this.area.sky.onThunder = d => setTimeout(() => this.audio.play("thunder", { dist: d }), (d / 343) * 1000)
+      const { day } = this.area.sky.update(dt, this.hourOfDay(), this.camera, this.area.fogColor(this.pc.pos.x, this.pc.pos.z), this.area.scene.fog, redness)
+      this.daylight = day
+      this.area.scene.background = this.area.sky.skyColor
+      if (this.pc.underwater) {
+        // murky teal water: short fog, darker with depth and at night
+        const f = this.area.scene.fog
+        const depth = Math.max(0, SEA_LEVEL - this.camera.position.y)
+        f.color.setRGB(0.06, 0.22, 0.26).multiplyScalar((0.35 + day * 0.65) * Math.max(0.4, 1 - depth / 25))
+        f.near = 0.5
+        f.far = 30
+        this.area.scene.background = f.color
+      }
+      this.knownTownCheck()
+    } else this.daylight = 0
+
+    updatePlayer(this, dt)
+    this.audio.setUnderwater(!!this.pc.underwater && this.area.kind === "overworld")
+    this.area.update(dt)
+    for (const p of this.projectiles) p.update(dt)
+    this.projectiles = this.projectiles.filter(p => !p.dead)
+    this.updateFlashes(dt)
+    this.particles.update(dt)
+    const regen = equippedUnique(c, "regen")
+    if (regen && c.health > 0) c.health = Math.min(maxHealth(c), c.health + regen.amount * dt)
+
+    // timed effects
+    const expired = tickEffects(c, dt)
+    for (const e of expired) {
+      if (e.type === "bound") this.endBound(e)
+      else if (e.label) this.msg(`${e.label} has worn off.`, "#a8a090")
+    }
+    // regeneration
+    if (!this.pc.sprinting) c.fatigue = Math.min(maxFatigue(c), c.fatigue + (2.5 + getAttr(c, "endurance") / 25) * dt)
+    if (!BIRTHSIGNS[c.sign].noMagickaRegen) c.magicka = Math.min(maxMagicka(c), c.magicka + (getAttr(c, "willpower") / 100) * 0.35 * dt)
+    // hazards
+    if (c.poison > 0) {
+      c.poison -= dt
+      this.damagePlayer(1.5 * dt * (1 - resistance(c, "poison")), { quiet: true })
+    }
+    if (this.area.kind === "overworld" && this.pc.onGround && this.world.lavaAt(this.pc.pos.x, this.pc.pos.z) && this.pc.pos.y < this.world.heightAt(this.pc.pos.x, this.pc.pos.z) + 0.3) {
+      this.damagePlayer(14 * dt, { element: "fire", quiet: true })
+      if (Math.random() < dt * 2) this.msg("The lava burns!", "#ff8a4a")
+    }
+    this.playerLight.intensity = hasEffect(c, "light") ? 60 : this.area.kind === "dungeon" ? 22 : this.area.kind === "interior" ? 5 : RACES[c.race].nightEye && this.isNight() ? 12 : 0
+    this.playerLight.distance = hasEffect(c, "light") ? 34 : 16
+    this.lastTargetT -= dt
+    this.saveT = (this.saveT || 0) + dt
+    if (this.saveT > 20) this.autosave()
+    this.pc.hurtFlash = Math.max(0, this.pc.hurtFlash - dt * 2)
+  }
+
+  knownTownCheck() {
+    for (const t of this.world.towns) {
+      if (!this.knownTowns.has(t.id) && Math.hypot(t.x - this.pc.pos.x, t.z - this.pc.pos.z) < t.radius + 30) {
+        this.knownTowns.add(t.id)
+        this.msg(`You have discovered ${t.name}.`, "#f0d890")
+        this.audio.sting("discover")
+      }
+    }
+    for (const l of this.world.landmarks || []) {
+      if (this.landmarks.found.includes(l.id)) continue
+      if (Math.hypot(l.x - this.pc.pos.x, l.z - this.pc.pos.z) < (l.type === "ghostfence" ? 45 : 32)) {
+        this.landmarks.found.push(l.id)
+        this.msg(`Discovered: ${l.name}`, "#f0d890")
+        this.audio.sting("discover")
+      }
+    }
+    for (const d of this.world.dungeons) {
+      if (!d.discovered && Math.hypot(d.x - this.pc.pos.x, d.z - this.pc.pos.z) < 30) {
+        d.discovered = true
+        this.msg(`Discovered: ${d.name}`, "#f0d890")
+        this.audio.sting("discover")
+      }
+    }
+  }
+
+  // ---------- messages & journal ----------
+
+  msg(text, color) {
+    this.ui.message(text, color)
+  }
+
+  addJournal(text) {
+    this.journal.push({ day: Math.floor(this.time / 24) + 1, text })
+  }
+
+  skillEvents(events) {
+    for (const e of events) {
+      if (e.type === "skillUp") {
+        this.msg(`Your ${SKILLS[e.skill].name} skill increased to ${e.value}.`, "#f0e0a0")
+        this.audio.play("skillup")
+      } else if (e.type === "levelReady") {
+        this.msg("You should rest and meditate on what you've learned. (Press T)", "#ffe080")
+      }
+    }
+  }
+
+  exercise(skill, amount) {
+    this.skillEvents(exerciseSkill(this.char, skill, amount))
+  }
+
+  // ---------- combat plumbing ----------
+
+  chameleon() {
+    const shadow = this.char.equipment.weapon?.unique?.type === "shadow" ? this.char.equipment.weapon.unique.amount : 0
+    return Math.min(0.95, effectAmount(this.char, "chameleon") + shadow)
+  }
+
+  playerEvasion() {
+    const c = this.char
+    return evasionOf(getAttr(c, "agility"), getAttr(c, "luck"), BIRTHSIGNS[c.sign].evasion || 0) + this.chameleon() * 30
+  }
+
+  damagePlayer(amount, { physical = false, element = null, source = null, quiet = false } = {}) {
+    const c = this.char
+    if (c.dead || this.mode !== "play") return
+    let dmg = amount
+    if (physical) {
+      const shield = c.equipment.shield
+      if (shield && !this.pc.charging && source) {
+        const toSrc = Math.atan2(source.pos.x - this.pc.pos.x, source.pos.z - this.pc.pos.z)
+        const facing = Math.atan2(-Math.sin(this.pc.yaw), -Math.cos(this.pc.yaw))
+        let diff = Math.abs(toSrc - facing)
+        if (diff > Math.PI) diff = Math.PI * 2 - diff
+        if (diff < 1.2 && Math.random() < blockChance(getSkill(c, "block"), getAttr(c, "agility"), getAttr(c, "luck"))) {
+          this.audio.play("block", { wood: ["netch leather", "chitin", "bonemold"].includes(shield.material) })
+          this.particles.burst(this.camera.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(-Math.sin(this.pc.yaw), -0.4, -Math.cos(this.pc.yaw)).multiplyScalar(0.8)), "metal", 10)
+          this.msg("Blocked!", "#c0c0c0")
+          this.exercise("block", 1)
+          c.fatigue = Math.max(0, c.fatigue - 4)
+          wearArmor(this, shield, amount * 0.6)
+          return
+        }
+      }
+      dmg = applyArmor(dmg, armorRating(c))
+      const slots = ["cuirass", "helm", "greaves", "boots", "gauntlets", "shield"]
+      const slot = slots[Math.floor(Math.random() * slots.length)]
+      const piece = c.equipment[slot]
+      if (piece?.armorClass) {
+        this.exercise(piece.armorClass, 1)
+        wearArmor(this, piece, dmg)
+      } else if (slot !== "shield") this.exercise("unarmored", 1)
+      // Ebony Mail and the like burn whoever strikes you
+      const shieldFx = equippedUnique(c, "fireShield")
+      if (shieldFx && source && !source.dead) source.takeDamage(shieldFx.amount, { element: "fire" })
+    }
+    if (element) {
+      dmg *= 1 - resistance(c, element)
+      if (element === "poison" && dmg > 0 && resistance(c, "poison") < 1) c.poison = Math.max(c.poison, 5)
+    }
+    if (dmg <= 0) return
+    c.health -= dmg
+    if (!quiet) {
+      this.audio.play("hurt")
+      this.pc.hurtFlash = Math.min(1, 0.3 + dmg / 20)
+    }
+    if (c.health <= 0) this.playerDied(source)
+  }
+
+  playerDied(source) {
+    const c = this.char
+    c.health = 0
+    c.dead = true
+    this.mode = "dead"
+    this.input.unlock()
+    this.audio.play("death")
+    this.audio.sting("death")
+    this.deathCause = source ? `slain by ${source.name}` : "succumbed to their wounds"
+    deleteSave()
+    this.recordRun(false)
+    setTimeout(() => this.ui.showDeath(), 1600)
+  }
+
+  score() {
+    const c = this.char
+    const s = c.stats
+    const relics = this.relicsHeld().length
+    return Math.round(c.level * 100 + s.kills * 10 + s.dungeonsCleared * 150 + s.questsDone * 75 + relics * 300 + c.gold / 10 + Math.floor(this.time / 24) * 20 + (this.mode === "victory" ? 5000 : 0))
+  }
+
+  recordRun(victory) {
+    const c = this.char
+    const entry = { name: c.name, race: RACES[c.race].name, cls: c.cls, level: c.level, days: Math.floor(this.time / 24) + 1, score: this.score(), victory, cause: victory ? "Destroyed the Heart of Lorkhan" : this.deathCause, seed: this.seed, date: new Date().toISOString().slice(0, 10) }
+    try {
+      const runs = JSON.parse(localStorage.getItem("ashfall-runs") || "[]")
+      runs.unshift(entry)
+      localStorage.setItem("ashfall-runs", JSON.stringify(runs.slice(0, 20)))
+    } catch {
+      /* storage unavailable */
+    }
+    return entry
+  }
+
+  pastRuns() {
+    try {
+      return JSON.parse(localStorage.getItem("ashfall-runs") || "[]")
+    } catch {
+      return []
+    }
+  }
+
+  enemyCast(enemy, spellId) {
+    const spell = getSpell(spellId)
+    const from = enemy.center.add(new THREE.Vector3(0, 0.3, 0))
+    const target = new THREE.Vector3(this.pc.pos.x, this.pc.pos.y + 1.2, this.pc.pos.z)
+    const vel = target.sub(from).normalize().multiplyScalar(17)
+    const el = spell.effects.find(e => e.element)?.element || "magic"
+    this.projectiles.push(new Projectile(this, this.area, { pos: from, vel, owner: "enemy", spell, color: ELEMENT_COLOR[el], source: enemy }))
+    this.audio.play("spell", { element: el, pos: from })
+  }
+
+  projectileImpact(p, target) {
+    if (p.arrow) {
+      const a = p.arrow
+      if (target === "player") {
+        this.damagePlayer(a.damage, { physical: true })
+        if (a.trap && Math.random() < 0.4) {
+          this.char.poison = Math.max(this.char.poison, 6)
+          this.msg("The dart was poisoned!", "#9ae070")
+        }
+        return
+      }
+      if (target && target !== "player") {
+        const dealt = strikeEnemy(this, target, { weapon: a.weapon, dmg: a.damage, charge: a.charge ?? 1, ranged: true, enchant: a.enchant, silver: a.silver, heavy: a.kind === "bolt" && (a.charge ?? 1) > 0.9, noCoat: a.kind !== "thrown" })
+        this.exercise("marksman", 1)
+        this.setTarget(target)
+        if (dealt > 0 && a.sneak) this.msg("Sneak attack! Critical hit.", "#ffe080")
+        // some arrows, bolts and thrown weapons survive to be taken back
+        if (a.recover && Math.random() < (a.kind === "thrown" ? 0.6 : 0.4)) target.stuck.push(a.recover)
+      } else {
+        this.audio.play("stick", { pos: p.pos.clone() })
+        this.particles.burst(p.pos, "stone", 5)
+      }
+      return
+    }
+    const spell = p.spell
+    const el = spell.effects.find(e => e.element)?.element || "magic"
+    this.flash(p.pos, ELEMENT_COLOR[el], spell.splash ? 3 : 1)
+    this.audio.play("explode", { element: el, pos: p.pos.clone(), size: spell.splash ? 1.6 : 1 })
+    if (p.owner === "player") {
+      const hits = spell.splash ? this.area.enemies.filter(e => !e.dead && e.center.distanceTo(p.pos) < spell.splash + e.radius) : target ? [target] : []
+      for (const e of hits) {
+        spellEffectsOnEnemy(this, spell, e)
+        this.setTarget(e)
+      }
+    } else {
+      const hitPlayer = target === "player" || (spell.splash && new THREE.Vector3(this.pc.pos.x, this.pc.pos.y + 1, this.pc.pos.z).distanceTo(p.pos) < spell.splash)
+      if (!hitPlayer) return
+      const c = this.char
+      const absorb = BIRTHSIGNS[c.sign].absorb || 0
+      if (absorb && Math.random() < absorb) {
+        c.magicka = Math.min(maxMagicka(c), c.magicka + spell.cost)
+        this.msg("You absorb the spell!", "#a0c0ff")
+        return
+      }
+      if (Math.random() < resistance(c, "magic") * 0.5) {
+        this.msg("You resisted the spell.", "#a0c0ff")
+        return
+      }
+      for (const e of spell.effects) {
+        if (e.type === "damage") this.damagePlayer(e.amount[0] + Math.random() * (e.amount[1] - e.amount[0]), { element: e.element, source: p.source })
+        if (e.type === "paralyze") this.msg("You resist the paralysis.", "#a0c0ff")
+      }
+    }
+  }
+
+  flash(pos, color, size = 1) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.5 * size, 10, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(2.5), transparent: true, opacity: 0.8, depthWrite: false }))
+    m.position.copy(pos)
+    const l = new THREE.PointLight(color, 8, 12 * size, 2)
+    m.add(l)
+    this.area.scene.add(m)
+    this.flashes.push({ m, t: 0.35, area: this.area })
+  }
+
+  updateFlashes(dt) {
+    for (const f of this.flashes) {
+      f.t -= dt
+      f.m.scale.multiplyScalar(1 + dt * 6)
+      f.m.material.opacity = Math.max(0, f.t * 2)
+      if (f.t <= 0) f.area.scene.remove(f.m)
+    }
+    this.flashes = this.flashes.filter(f => f.t > 0)
+  }
+
+  setTarget(e) {
+    this.lastTarget = e
+    this.lastTargetT = 4
+  }
+
+  // ---------- kills, loot, quests ----------
+
+  bossName(creatureId, dungeon) {
+    const rng = new RNG(`boss:${dungeon.seed}`)
+    return bossName(rng, CREATURES[creatureId].name)
+  }
+
+  onEnemyKilled(e) {
+    const c = this.char
+    c.stats.kills++
+    this.audio.creature(e, "death")
+    const loot = []
+    let gold = 0
+    const tier = e.tier || 1
+    if (e.def.gold) gold += Math.round(e.def.gold[0] + Math.random() * (e.def.gold[1] - e.def.gold[0]))
+    if (e.def.humanoid && Math.random() < 0.5) loot.push(...randomLoot(new RNG(Math.random() * 1e9), tier, "any", 1))
+    if (e.def.humanoid && Math.random() < 0.3) loot.push(randomPotion(new RNG(Math.random() * 1e9), tier))
+    if (e.def.loot && Math.random() < 0.65) loot.push(makeMisc(e.def.loot[Math.floor(Math.random() * e.def.loot.length)], 1))
+    if (e.boss) {
+      loot.push(...randomLoot(new RNG(Math.random() * 1e9), Math.min(7, tier + 1), this.area.kind === "dungeon" ? DUNGEON_THEMES[this.area.dungeon.type].lootTag : "any", 3))
+      gold += 50 * tier + Math.round(Math.random() * 100 * tier)
+      if (e.relic) loot.push(makeRelic(e.relic))
+      if (e.artifact) loot.push(makeArtifact(e.artifact))
+      if (e.questItem) loot.push(makeQuestItem(e.questItem.name, e.questItem.questId))
+    }
+    // take back what stuck in the body, merging stacks
+    for (const it of e.stuck) {
+      const same = loot.find(l => l.stackKey && l.stackKey === it.stackKey)
+      if (same) same.qty += it.qty
+      else loot.push({ ...it })
+    }
+    e.loot = loot
+    e.gold = gold
+    e.looted = loot.length === 0 && gold === 0
+    this.area.corpses.push(e)
+
+    for (const q of this.quests) {
+      if (q.status !== "active") continue
+      if (q.type === "cull" && q.creature === e.defId) {
+        q.killed++
+        this.msg(`${q.title}: ${q.killed}/${q.count}`, "#d8c890")
+        if (q.killed >= q.count) {
+          q.status = "ready"
+          this.msg(`Return to ${q.giverName} in ${q.giverTown}.`, "#f0d890")
+        }
+      }
+    }
+    if (this.area.kind === "dungeon") {
+      this.area.state.dead.add(e.spawnKey)
+      const d = this.area.dungeon
+      if (e.boss && !d.cleared) {
+        d.cleared = true
+        c.stats.dungeonsCleared++
+        this.msg(`${e.name} is dead. ${d.name} has been cleared.`, "#f0d890")
+        for (const q of this.quests) {
+          if (q.status === "active" && q.dungeonId === d.id && (q.type === "clear" || q.type === "bounty")) {
+            q.status = "ready"
+            this.msg(`Return to ${q.giverName} in ${q.giverTown} for your reward.`, "#f0d890")
+          }
+        }
+        if (e.relic) this.msg(`${e.name} carried ${e.relic}! Search the body.`, "#ffe080")
+        if (e.artifact) this.msg(`${e.name} guarded ${ARTIFACTS[e.artifact].name}! Search the body.`, "#ffe080")
+      }
+      if (e.defId === "dagoth") setTimeout(() => this.victory(), 2500)
+    }
+  }
+
+  victory() {
+    if (this.mode !== "play") return
+    this.mode = "victory"
+    this.input.unlock()
+    this.audio.sting("victory")
+    this.addJournal(`${this.world.mainQuest.dagoth} is dead and the Heart of Lorkhan is severed. The Blight will lift from Vvardenfell.`)
+    deleteSave()
+    this.recordRun(true)
+    this.ui.showVictory()
+  }
+
+  relicsHeld() {
+    return this.char.inventory.filter(i => i.relic).map(i => i.relic)
+  }
+
+  onItemTaken(item) {
+    if (item.artifact && !this.char.artifactsFound?.includes(item.artifact)) {
+      ;(this.char.artifactsFound ||= []).push(item.artifact)
+      this.msg(`Legendary artifact: ${item.name}!`, "#ffe080")
+      this.addJournal(`I found ${item.name}. ${item.lore}`)
+      this.audio.sting("discover")
+    }
+    if (item.relic) {
+      const held = this.relicsHeld()
+      this.msg(`You have recovered ${item.relic}. (${held.length}/3)`, "#ffe080")
+      this.addJournal(`I recovered ${relicDescription(item.relic)}.`)
+      if (held.length >= 3 && this.main.stage < 2) {
+        this.main.stage = 2
+        const cit = this.world.dungeons[this.world.mainQuest.citadelId]
+        cit.sealed = false
+        this.addJournal(`With Sunder, Keening and Wraithguard in hand, the seal on ${cit.name} in the crater of Red Mountain will open for me. ${this.world.mainQuest.dagoth} waits at the Heart.`)
+        this.msg("All three tools of Kagrenac are yours. Go to Red Mountain.", "#ffe080")
+      }
+    }
+    if (item.questId === "isle") {
+      this.isle.stage = 2
+      this.msg("You have the Horn of the Ancestors. Return it to the village elder.", "#f0d890")
+      this.addJournal("I took the Horn of the Ancestors from the draugr lord's body.")
+    }
+    if (item.kind === "quest") {
+      const q = this.quests.find(q => q.id === item.questId)
+      if (q && q.status === "active") {
+        q.status = "ready"
+        this.msg(`Return the ${item.name} to ${q.giverName} in ${q.giverTown}.`, "#f0d890")
+      }
+    }
+  }
+
+  // ---------- landmarks ----------
+
+  landmarkState(id) {
+    return (this.landmarks.state[id] ||= {})
+  }
+
+  openLandmarkChest(l) {
+    const st = this.landmarkState(l.id)
+    if (!st.opened) {
+      st.opened = true
+      const rng = new RNG(`landmark:${l.seed}`)
+      st.items = randomLoot(rng, l.tier + 1, l.type === "wreck" ? "coast" : "any", 3)
+      if (l.type === "wreck") st.items.push(makeMisc("pearl", rng.int(1, 3)))
+      st.gold = rng.int(20, 60) * l.tier
+      this.audio.play("door")
+    }
+    this.ui.openContainer(l.name, { get loot() { return st.items }, set loot(v) { st.items = v }, get gold() { return st.gold }, set gold(v) { st.gold = v } })
+  }
+
+  // Prise open a clam on the sea floor: sometimes a pearl.
+  openClam(c) {
+    const st = this.landmarkState(`c${c.id}`)
+    if (st.opened) return
+    st.opened = true
+    this.area.seabed?.userData.open(c.id)
+    const r = new RNG(`clam:${c.seed}`).next()
+    if (r < 0.45) {
+      const n = r < 0.08 ? 2 : 1
+      addItem(this.char, makeMisc("pearl", n))
+      this.audio.play("pickup")
+      this.msg(n > 1 ? "Two pearls!" : "You find a pearl.", "#e0e8f0")
+    } else this.msg("The clam is empty.", "#a8a090")
+  }
+
+  // Propylon chambers link to every other chamber you have found.
+  usePropylon(l) {
+    const found = (this.world.landmarks || []).filter(o => o.type === "propylon" && o.id !== l.id && this.landmarks.found.includes(o.id))
+    if (!found.length) return this.msg("The index stone is cold. You must find another Propylon chamber before this one will carry you anywhere.", "#a0c0ff")
+    this.ui.openChoice(l.name, "The index stone hums. Where will you go?", found.map(o => ({
+      label: o.name,
+      act: () => {
+        this.pc.pos.set(o.x + 2.5, this.world.heightAt(o.x + 2.5, o.z), o.z)
+        this.pc.vel.set(0, 0, 0)
+        this.audio.play("spell", { element: "restore" })
+        this.msg(`The Propylon carries you to ${o.name}.`, "#a0c0ff")
+      },
+    })))
+  }
+
+  // ---------- dungeons ----------
+
+  enterDungeon(d) {
+    if (d.sealed) {
+      const held = this.relicsHeld()
+      this.msg(`A ward of the Sixth House seals the door. You need Sunder, Keening and Wraithguard (${held.length}/3).`, "#ff9a7a")
+      return
+    }
+    this.returnPos = { x: this.pc.pos.x, y: this.pc.pos.y, z: this.pc.pos.z, yaw: this.pc.yaw + Math.PI }
+    this.msg(`Entering ${d.name}...`, "#c9b88f")
+    d.discovered = true
+    this.loadDungeonLevel(d, 0, false)
+  }
+
+  loadDungeonLevel(d, level, fromBelow, quiet = false) {
+    const st = (this.dungeonState[d.id] ||= { levels: {} })
+    const lst = (st.levels[level] ||= { dead: new Set(), chests: {} })
+    const lvl = generateDungeonLevel({ seed: d.seed, type: d.type, tier: d.tier, level, levels: d.levels, relic: d.relic, citadel: !!d.citadel })
+    if (this.area.kind === "dungeon") this.area.dispose()
+    const area = new DungeonArea(this, d, level, lvl, lst)
+    this.setArea(area)
+    const spawnCell = fromBelow ? lvl.stairsDown : lvl.entry
+    const p = area.cellCenter(spawnCell.x, spawnCell.y)
+    this.pc.pos.copy(p)
+    this.pc.vel.set(0, 0, 0)
+    this.char.stats.deepest = Math.max(this.char.stats.deepest, level + 1)
+    if (quiet) return
+    this.audio.play("door")
+    this.msg(`${d.name} — level ${level + 1} of ${d.levels}`, "#c9b88f")
+    this.autosave()
+  }
+
+  // ---------- building interiors ----------
+
+  enterInterior(townId, idx, quiet = false) {
+    const town = this.world.towns[townId]
+    const b = town.buildings[idx]
+    if (this.area.kind === "overworld") {
+      // come back out on the doorstep, facing away from the building
+      const dx = b.door.x - b.x
+      const dz = b.door.z - b.z
+      const l = Math.hypot(dx, dz) || 1
+      const ox = b.door.x + (dx / l) * 1.2
+      const oz = b.door.z + (dz / l) * 1.2
+      this.returnPos = { x: ox, y: this.world.heightAt(ox, oz), z: oz, yaw: Math.atan2(-dx, -dz) }
+    }
+    if (this.area.kind !== "overworld") this.area.dispose()
+    const area = new InteriorArea(this, town, b)
+    this.setArea(area)
+    this.pc.pos.copy(area.entryPos)
+    this.pc.vel.set(0, 0, 0)
+    this.pc.yaw = Math.PI // facing into the room (+z)
+    this.pc.pitch = 0
+    if (quiet) return
+    this.audio.play("door")
+    this.msg(b.label ? `${b.label}, ${town.name}` : `A home in ${town.name}`, "#c9b88f")
+    this.autosave()
+  }
+
+  exitInterior() {
+    this.area.dispose()
+    this.setArea(this.overworld)
+    const r = this.returnPos
+    this.pc.pos.set(r.x, r.y, r.z)
+    this.pc.yaw = r.yaw
+    this.pc.vel.set(0, 0, 0)
+    this.audio.play("door")
+    this.autosave()
+  }
+
+  exitDungeon() {
+    if (this.area.kind === "dungeon") this.area.dispose()
+    this.setArea(this.overworld)
+    const r = this.returnPos
+    this.pc.pos.set(r.x, r.y, r.z)
+    this.pc.yaw = r.yaw
+    this.pc.vel.set(0, 0, 0)
+    this.audio.play("door")
+    this.autosave()
+  }
+
+  teleportToTown(town) {
+    if (this.area.kind !== "overworld") {
+      this.area.dispose()
+      this.setArea(this.overworld)
+    }
+    this.pc.pos.set(town.x + 3, town.y, town.z + 3)
+    this.pc.vel.set(0, 0, 0)
+    this.knownTowns.add(town.id)
+  }
+
+  // ---------- bound weapons ----------
+
+  endBound(effect) {
+    const c = this.char
+    const item = c.inventory.find(i => i.uid === effect.key)
+    if (item) removeItem(c, item)
+    if (effect.prev && c.inventory.includes(effect.prev)) equip(c, effect.prev)
+    this.msg("Your bound weapon returns to Oblivion.", "#a8a090")
+  }
+
+  // Spawn a bag of dropped items at the player's feet.
+  dropItem(item, qty) {
+    const c = this.char
+    const n = Math.min(qty, item.qty || 1)
+    const copy = { ...item, qty: item.stackKey ? n : undefined }
+    removeItem(c, item, n)
+    const pos = new THREE.Vector3(this.pc.pos.x, this.pc.pos.y + 0.3, this.pc.pos.z)
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), new THREE.MeshLambertMaterial({ color: 0x8a7a50 }))
+    mesh.position.copy(pos)
+    this.area.scene.add(mesh)
+    this.area.sacks.push({ pos, items: [copy], gold: 0, mesh })
+  }
+}
+
+export function makeRelic(name) {
+  let item
+  if (name === "Sunder") {
+    item = makeWeapon("dwemer", "warhammer")
+    item.damage = [22, 42]
+    item.enchant = { key: "shock", element: "shock", amount: 12, tag: "" }
+    item.color = 0xc0a040
+  } else if (name === "Keening") {
+    item = makeWeapon("glass", "shortsword")
+    item.damage = [16, 30]
+    item.enchant = { key: "absorb", absorb: true, amount: 8, tag: "" }
+    item.color = 0xb0e0ff
+  } else {
+    item = makeArmor("dwemer", "gauntlets")
+    item.ar = 30
+    item.enchant = { key: "resistMagic", resist: "magic", amount: 0.5, tag: "" }
+  }
+  item.name = name
+  item.relic = name
+  item.value = 0
+  item.weight = Math.round(item.weight * 0.5)
+  return item
+}
+
+export { SEA_LEVEL, getAttr, getSkill, maxHealth, maxMagicka, maxFatigue, fatigueRatio, addItem }
