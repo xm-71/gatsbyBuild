@@ -13,6 +13,13 @@ export class Input {
     this.wheel = 0
     this.locked = false
     this.sensitivity = 0.0022
+    // gamepad and touch controls feed these: held actions, one-frame presses,
+    // and an analog movement axis (x strafe, y forward)
+    this.vHeld = new Set()
+    this.vPressed = new Set()
+    this.axis = { x: 0, y: 0 }
+    this.padActive = false
+    this.touchActive = false
 
     window.addEventListener("keydown", e => {
       if (e.target instanceof HTMLInputElement) return
@@ -75,16 +82,33 @@ export class Input {
     return this.pressed.has(code)
   }
 
-  // Rebindable actions (see core/settings.js).
+  // Playing without a mouse lock: a gamepad or touch screen is in charge.
+  get active() {
+    return this.locked || this.padActive || this.touchActive
+  }
+
+  // Rebindable actions (see core/settings.js), plus gamepad and touch.
   action(name) {
-    return this.keys.has(settings.keys[name])
+    if (this.keys.has(settings.keys[name]) || this.vHeld.has(name)) return true
+    const a = this.axis
+    if (name === "forward") return a.y > 0.35
+    if (name === "back") return a.y < -0.35
+    if (name === "right") return a.x > 0.35
+    if (name === "left") return a.x < -0.35
+    return false
   }
 
   actionPressed(name) {
-    return this.pressed.has(settings.keys[name])
+    return this.pressed.has(settings.keys[name]) || this.vPressed.has(name)
+  }
+
+  // A virtual button press from the gamepad or touch controls.
+  press(name) {
+    this.vPressed.add(name)
   }
 
   endFrame() {
+    this.vPressed.clear()
     this.pressed.clear()
     this.mouseDX = 0
     this.mouseDY = 0

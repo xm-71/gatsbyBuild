@@ -27,3 +27,9 @@ async function start() {
 }
 
 start()
+
+// Offline play: cache the game once it has loaded (production builds only,
+// so the dev server always serves fresh code).
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}))
+}

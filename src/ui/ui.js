@@ -26,6 +26,13 @@ function condBar(i) {
 }
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c])
+// The browser's "add to home screen" offer, kept for the title screen's Install button.
+let installPrompt = null
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault()
+  installPrompt = e
+  if (window.game?.mode === "title") window.game.ui.showTitle()
+})
 const pct = (a, b) => `${Math.max(0, Math.min(100, (a / Math.max(1, b)) * 100))}%`
 
 function el(tag, cls, html) {
@@ -121,6 +128,7 @@ export class UI {
           ${sv ? `<button class="big continue" data-act="continue">Continue</button><div class="dim small-note center">${esc(sv.name)} · level ${sv.level} ${esc(RACES[sv.race]?.name || sv.race)} ${esc(CLASSES[sv.cls]?.name || sv.cls)} · day ${sv.day} · seed ${esc(sv.seed)}</div>` : ""}
           <button class="big" data-act="new">New Run</button>
           <button data-act="settings">Settings</button>
+          ${installPrompt ? `<button data-act="install" title="Add Ashfall to your device and play offline">Install for offline play</button>` : ""}
           ${sv ? `<div class="dim small-note center">Starting a new run ends your saved run.</div>` : ""}
           <details><summary>How to play</summary>
             <p>Create a character, then survive a freshly generated Vvardenfell. Talk to the Blades contact in your starting town to learn the main quest: recover Kagrenac's three tools from the strongholds that hold them, then descend into the Citadel under Red Mountain and slay the Dagoth lord. Death is permanent.</p>
@@ -135,6 +143,8 @@ export class UI {
               <tr><td>T</td><td>rest (and level up)</td></tr>
               <tr><td>Tab · K · M · J</td><td>inventory · character · map · journal</td></tr>
             </table>
+            <p><b>Controller:</b> left stick moves, right stick looks, RT attacks, LT casts, A jumps, B sneaks, X uses, Y drinks a potion, LB/RB change spell, L3 sprints. Start opens the inventory, Back the map, D-pad up rests and down opens the journal. In menus, move with the D-pad, press with A and close with B.</p>
+            <p><b>Touch (landscape):</b> drag the left side to move and the right side to look, and use the on-screen buttons for everything else.</p>
           </details>
           ${runs.length ? `<details open><summary>Past runs</summary><table class="runs">${runs.slice(0, 8).map(r => `<tr class="${r.victory ? "win" : ""}"><td>${esc(r.name)}</td><td>${esc(r.race)} ${esc(CLASSES[r.cls]?.name || r.cls)} L${r.level}</td><td>${r.days}d</td><td>${r.score}</td><td class="dim">${esc(r.cause)}</td></tr>`).join("")}</table></details>` : ""}
         </div>
@@ -157,6 +167,13 @@ export class UI {
         hideLoading()
       },
       settings: () => this.openSettings(),
+      install: async () => {
+        const p = installPrompt
+        installPrompt = null
+        p?.prompt()
+        await p?.userChoice.catch(() => {})
+        this.screen.querySelector("[data-act='install']")?.remove()
+      },
       continue: async () => {
         this.screen.classList.add("hidden")
         this.game.input.lock()
@@ -424,7 +441,7 @@ export class UI {
             if (Object.values(c.equipment).includes(it)) cls += " on"
           }
         } else cls += " empty"
-        return `<div class="${cls}" title="${esc(label)}"><b>${k + 1}</b><span>${esc(label)}</span>${qty}</div>`
+        return `<div class="${cls}" data-slot="${k + 1}" title="${esc(label)}"><b>${k + 1}</b><span>${esc(label)}</span>${qty}</div>`
       })
       .join("")
     if (html !== this.lastQuickbar) {

@@ -215,3 +215,51 @@ p.small { font-size: 13px; margin: 2px 0; }
 .modal-layer.talking { background: linear-gradient(90deg, rgba(0,0,0,0) 30%, rgba(0,0,0,0.45) 60%); place-items: center end; padding-right: 2vw; }
 .modal-layer.talking .dialogue { width: min(560px, 54vw); }
 @media (max-width: 760px) { .modal-layer.talking { place-items: end center; padding: 0 0 2vh; background: rgba(0,0,0,0.2); } .modal-layer.talking .dialogue { width: 96vw; height: 58vh; } }
+
+/* gamepad highlight */
+.pad-focus { outline: 2px solid #ffd060 !important; outline-offset: 2px; box-shadow: 0 0 12px rgba(255, 208, 96, 0.5); }
+
+/* ---------------- touch controls (phones and tablets) ---------------- */
+.touch-ui { position: fixed; inset: 0; z-index: 5; touch-action: none; user-select: none; -webkit-user-select: none; }
+.touch-ui .t-zone { position: absolute; top: 0; bottom: 0; }
+.touch-ui .t-move { left: 0; width: 42%; }
+.touch-ui .t-look { right: 0; width: 58%; }
+.t-base { position: absolute; width: 124px; height: 124px; margin: -62px 0 0 -62px; border-radius: 50%; border: 2px solid rgba(232, 208, 144, 0.35); background: rgba(20, 14, 8, 0.25); opacity: 0; transition: opacity 0.15s; pointer-events: none; }
+.t-base.on { opacity: 1; }
+.t-knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(232, 208, 144, 0.55); }
+.t-buttons { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: 14px; width: 220px; height: 200px; }
+.t-btn { position: absolute; width: 58px; height: 58px; border-radius: 50%; border: 2px solid rgba(232, 208, 144, 0.55); background: rgba(20, 14, 8, 0.5); color: #f0e0b0; font-size: 22px; padding: 0; touch-action: none; }
+.t-btn.down { background: rgba(200, 160, 80, 0.55); }
+.t-attack { right: 0; bottom: 0; width: 84px; height: 84px; font-size: 32px; }
+.t-cast { right: 96px; bottom: 6px; }
+.t-jump { right: 12px; bottom: 98px; }
+.t-use { right: 84px; bottom: 76px; }
+.t-sneak { right: 160px; bottom: 60px; width: 46px; height: 46px; font-size: 18px; }
+.t-potion { right: 150px; bottom: 124px; width: 46px; height: 46px; font-size: 18px; }
+.t-sprint { right: 74px; bottom: 146px; width: 46px; height: 46px; font-size: 18px; }
+.t-top { position: absolute; top: 112px; right: max(8px, env(safe-area-inset-right)); display: flex; gap: 6px; }
+.t-small { padding: 6px 10px; font-size: 13px; background: rgba(20, 14, 8, 0.6); }
+.t-rotate { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(8, 6, 4, 0.94); color: #e8d8a8; text-align: center; font-size: 18px; }
+.t-phone { font-size: 56px; animation: t-turn 1.6s ease-in-out infinite; }
+@keyframes t-turn { 0%, 30% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+.hidden.touch-ui, .t-rotate.hidden { display: none; }
+/* phone-sized HUD: the map goes top-right, bars and quick-slots shrink,
+   and the right-hand corner is left free for the buttons */
+body.touch .mapbox { top: 8px; bottom: auto; right: 8px; }
+body.touch .mapbox canvas { width: 96px; height: 96px; }
+body.touch .status { font-size: 11px; }
+body.touch .compassbar { width: 46vw; top: 4px; }
+body.touch .equip { display: none; }
+body.touch .bars { height: 80px; left: 8px; bottom: auto; top: 50%; transform: translateY(-50%); }
+body.touch .quickbar { bottom: 6px; left: 40%; transform: translateX(-50%) scale(0.85); pointer-events: auto; }
+body.touch .msgs { max-width: 40vw; font-size: 13px; }
+body.touch .prompt { font-size: 15px; }
+body.touch .pause-hint { display: none; }
+@media (max-height: 520px) {
+  .dialogue, .panel.menu { height: 96vh !important; }
+  .menu-body { font-size: 14px; }
+}
+body.touch .hud { z-index: 6; pointer-events: none; }
+body.touch .modal-layer, body.touch .screen { position: fixed; z-index: 7; }
+body.touch .hud * { pointer-events: none; }
+body.touch .hud .quickbar, body.touch .hud .quickbar * { pointer-events: auto; }

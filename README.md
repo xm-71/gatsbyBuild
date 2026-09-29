@@ -28,6 +28,30 @@ The compass at the top of the screen points to your current quest targets and ne
 | T | Rest (level-ups happen when you rest) |
 | Tab or I · K · M · J | Inventory · character · map · journal |
 
+### Controller
+
+Xbox, PlayStation and other standard controllers work as soon as you press a button.
+
+| Button | Action |
+| --- | --- |
+| Left stick / right stick | Move / look |
+| RT / LT | Attack (hold for a stronger blow) / cast |
+| A · B · X · Y | Jump · sneak · talk, open and use · drink a potion |
+| LB / RB | Previous / next spell |
+| L3 / R3 | Sprint (hold) / character sheet |
+| Start / Back | Inventory / map |
+| D-pad | Up rests, down opens the journal, left and right use quick-slots 1 and 2 |
+
+In menus, the D-pad or left stick moves a highlight, A presses, B closes, and LB/RB switch tabs.
+
+### Phones and tablets
+
+Hold the device in landscape. Drag anywhere on the left half to move and on the right half to look. On-screen buttons cover attack, cast, jump, use, sneak, potion and sprint, with Menu, Map and Rest at the top. Tap a quick-slot to use it.
+
+### Offline
+
+The game installs as an app from the browser menu, or from the **Install for offline play** button on the title screen when the browser offers it. After one visit it plays without a connection, since everything is generated on the device.
+
 ## Graphics
 
 Pick **Low / Medium / High** in Settings. Your choice is remembered, and changing it reloads the page. All art is generated at load time, in parallel web workers:
@@ -44,12 +68,13 @@ Pick **Low / Medium / High** in Settings. Your choice is remembered, and changin
 - **Water:** the sea knows its depth, so shallows turn turquoise and clear, and foam rolls in along every shore. Caustic light dances on the sea floor. You can dive (look down and swim forward; jump or look up to rise) into a murky teal view with muffled sound and a breath meter. Argonians breathe water; everyone else starts drowning after 20–40 seconds.
 - **Animation:** people and creatures blink, glance around, shift their weight and fidget. Their feet meet slopes (the uphill leg bends), and four-legged creatures pitch and roll with the ground. Humanoids vary their attacks between overhead, sweeping and thrusting blows, flinch when hit, and collapse when they die: their knees buckle, then they topple and settle.
 - **Faces:** townsfolk get varied noses, jaws, chins, brows and cheekbones, plus war paint, scars, mustaches and beards. Talking to someone moves the camera into a close-up of their face, and their mouth and hands move as they speak.
+- **Weather:** thunderstorms with lightning that lights up the land, snow and blizzards on the northern isle, and the sky reddens under a blight storm.
 - **Dungeons:** sculpted cave rock with stalactites; built dungeons have trims, corner pillars, ceiling beams, pipes or ribs, and hanging lanterns. Props, chests and doorways are all textured.
 
 | | Low | Medium | High |
 | --- | --- | --- | --- |
 | Texture size | 256 | 512 | 1024 |
-| Terrain grid | 256² | 512² | 768² |
+| Terrain grid | 320² | 640² | 960² |
 | Shadows | off | 2048 | 4096 |
 | Grass carpet | off | yes | dense |
 | Bloom and light shafts | off | yes | yes |
@@ -67,9 +92,14 @@ All sound is synthesized in the browser with WebAudio. There are no audio files.
 
 ## What's generated
 
-- **The island.** A seeded heightmap with Red Mountain and its crater, surrounded by seven regions arranged at random: Ashlands, West Gash, Bitter Coast, Ascadian Isles, Grazelands, Azura's Coast and Molag Amur (with lava fields). Each region has its own palette, flora (emperor parasols, swamp trees, dead trees, grass and rocks), weather (ash storms, blight storms, rain, fog) and creatures. There's a day/night cycle, and the moons Masser and Secunda rise at night.
-- **Towns.** Eight settlements with generated names, built in the Imperial, Redoran, Hlaalu, Telvanni or Ashlander style. They contain temples, guild halls, Great House councils, traders, smiths, guards and townsfolk, plus a silt strider port for fast travel.
-- **Dungeons.** Twenty sites of four kinds. Caves use cellular automata. Ancestral tombs, Dwemer ruins and Daedric shrines use rooms and corridors. Each has one to three levels, with themed monsters, props, locked chests, loot tiers and a named boss on the bottom level.
+- **The island.** A seeded 1.8 km heightmap with Red Mountain and its crater, surrounded by seven regions arranged at random: Ashlands, West Gash, Bitter Coast, Ascadian Isles, Grazelands, Azura's Coast and Molag Amur (with lava fields). Each region has its own palette, flora (emperor parasols, swamp trees, dead trees, grass and rocks), weather (ash storms, blight storms, rain, fog) and creatures. There's a day/night cycle, and the moons Masser and Secunda rise at night.
+- **The frozen isle.** Across a strait to the north lies a snowy island of pines, with its own creatures (wolves, snow bears, rieklings, ice wraiths, draugr), Nordic barrows, and a Nord village whose elder asks you to recover the Horn of the Ancestors from a barrow. A boat from the mainland docks will take you there, or you can swim.
+- **Towns.** Eight settlements with generated names, built in the Imperial, Redoran, Hlaalu, Telvanni or Ashlander style, plus the Nord village. They contain temples, guild halls, Great House councils, traders, smiths, guards and townsfolk, plus a silt strider port for fast travel.
+- **Interiors.** Walk through the door of any shop, guild hall, temple or home and a furnished room is generated for it: counters and shelves for traders, a forge for smiths, altars and pews in temples, bookshelves in the Mages Guild, beds and tables in homes. Shopkeepers and guild members wait inside, and townsfolk live in the houses.
+- **Roads and travel.** Roads are routed across the terrain between towns, with signposts at the forks. Boats sail between coastal docks, the Mages Guild guides teleport you between guild halls, and Dwemer-era propylon chambers link to one another once you have found them.
+- **Landmarks.** Velothi towers, shipwrecks on the shore, bandit strongholds that restock with new bandits, propylon chambers, Dwemer ruins, sunken wrecks and giant clams with pearls on the sea floor, and the Ghostfence ringing Red Mountain.
+- **Dungeons.** Twenty-five sites of five kinds (caves, ancestral tombs, Dwemer ruins, Daedric shrines and Nordic barrows). Caves use cellular automata; the rest use rooms and corridors. Each has one to three levels, with themed monsters, props, locked chests, loot tiers and a named boss on the bottom level. Levels have rooms at different heights joined by ramps, flooded or lava-filled low ground, pressure-plate dart and gas traps, secret closets behind loose walls, and vaults behind a gate worked by a three-lever puzzle.
+- **World events.** Bandits ambush caravans on the road, the Sixth House raids towns at night, and merchants and pilgrims walk between towns. Blight storms bring tougher, diseased creatures.
 - **NPCs, loot and quests.** Names come from race-specific syllable tables. Weapons and armor are built from materials running from iron to daedric, with random enchantments. Guild duties are generated: clear a dungeon, bounties, retrieve an artifact, cull creatures, or deliver a package. Rumors reveal dungeons on your map.
 
 ## Morrowind systems
@@ -82,7 +112,7 @@ All sound is synthesized in the browser with WebAudio. There are no audio files.
 - **Legendary artifacts.** Fourteen named artifacts with lore and unique effects, such as Mehrunes' Razor, Goldbrand, Umbra, the Ice Blade of the Monarch, Ebony Mail and the Boots of Blinding Speed. Every Daedric shrine's master carries one, and a few other strong dungeon bosses guard the rest.
 - **Magic.** Destruction, Restoration, Alteration, Illusion, Mysticism and Conjuration spells, including bound weapons, Divine and Almsivi Intervention, Detect Creature, Open Lock, Calm and Paralyze. Racial and birthsign powers can be used once a day. Spell success chance applies.
 - **Factions.** Fighters, Mages and Thieves Guilds, the Temple, the Imperial Legion, the Morag Tong, and Houses Redoran, Hlaalu and Telvanni (you may join only one House). Ten ranks each, gated on reputation and favored skills.
-- **Dialogue.** Disposition, persuasion (admire, intimidate, bribe), barter priced by mercantile skill, training (five sessions per level), spell merchants, temple healing and silt strider travel.
+- **Dialogue.** Disposition, persuasion (admire, intimidate, bribe), barter priced by mercantile skill, training (five sessions per level), spell merchants, temple healing, repairs at the smith, and travel by silt strider, boat or Mages Guild guide.
 
 ## Main quest
 
@@ -96,8 +126,9 @@ src/data/     races, classes, birthsigns, skills, spells, items, creatures, fact
 src/logic/    pure, testable generation and rules (world, dungeons, character, combat, items, quests)
 src/render/   Three.js builders: terrain, flora, buildings, creatures, dungeons, sky, first-person view
 src/game/     runtime: game loop, areas, actors and AI, player controller, dialogue services, audio, input
-src/ui/       HUD, menus, dialogue, character creation, title/death/victory screens
+src/ui/       HUD, menus, dialogue, character creation, title/death/victory screens, touch controls
+public/       app manifest, icons and the offline service worker
 tests/        node:test suites for the logic layer
 ```
 
-All art and audio are procedural. There are no asset files.
+All art and audio are procedural. There are no asset files apart from the app icons.

@@ -27,6 +27,8 @@ import { showLoading, hideLoading } from "../ui/loading.js"
 import { Q } from "../core/quality.js"
 import { onSettingsChange } from "../core/settings.js"
 import { PostFX } from "../render/post.js"
+import { GamepadInput } from "./gamepad.js"
+import { TouchControls } from "../ui/touch.js"
 import { settings } from "../core/settings.js"
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js"
 
@@ -56,6 +58,8 @@ export class Game {
     this.input = new Input(this.renderer.domElement)
     this.audio = new Audio()
     this.ui = new UI(this)
+    this.gamepad = new GamepadInput(this)
+    this.touch = new TouchControls(this)
     onSettingsChange(s => {
       this.input.sensitivity = 0.0022 * s.sensitivity
       this.camera.fov = s.fov
@@ -284,11 +288,13 @@ export class Game {
     this.timer.update()
     if (!this.overworld || !this.area || !this.world) return
     const dt = Math.min(0.05, this.timer.getDelta())
+    this.gamepad.poll(dt)
+    this.touch.update(dt)
     if (this.mode === "title" || this.mode === "chargen") this.updateTitle(dt)
     else if (this.mode === "play") {
       if (this.ui.modal === "dialogue" && this.ui.dialogueNpc) this.updateTalkCamera(dt)
-      if (!this.ui.modal && this.input.locked) this.update(dt)
-      else if (!this.ui.modal && !this.input.locked) this.ui.showPauseHint(true)
+      if (!this.ui.modal && this.input.active) this.update(dt)
+      else if (!this.ui.modal && !this.input.active) this.ui.showPauseHint(true)
       this.ui.updateHud()
     } else if (this.mode === "dead" || this.mode === "victory") {
       this.pc.pitch = Math.min(this.pc.pitch + dt * 0.3, 0.2)
@@ -299,7 +305,7 @@ export class Game {
     }
     this.viewmodel.root.visible = this.mode === "play" && this.ui.modal !== "dialogue"
     this.audio.update(dt, this)
-    if (this.input.locked) this.ui.showPauseHint(false)
+    if (this.input.active) this.ui.showPauseHint(false)
     this.input.endFrame()
     this.updatePost(dt)
     this.post.render(this.area.scene, this.camera)

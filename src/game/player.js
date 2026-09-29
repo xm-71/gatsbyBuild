@@ -67,7 +67,7 @@ export function updatePlayer(game, dt) {
   if (inp.actionPressed("rest")) return tryRest(game)
   if (inp.actionPressed("quaff")) quickPotion(game)
   if (inp.wheel || inp.wasPressed("BracketRight") || inp.wasPressed("BracketLeft")) cycleSpell(game, inp.wheel || (inp.wasPressed("BracketLeft") ? -1 : 1))
-  for (let i = 1; i <= 9; i++) if (inp.wasPressed(`Digit${i}`)) useQuickslot(game, i - 1)
+  for (let i = 1; i <= 9; i++) if (inp.wasPressed(`Digit${i}`) || inp.vPressed.has(`slot${i}`)) useQuickslot(game, i - 1)
 
   // ---- movement ----
   const fwd = new THREE.Vector3(-Math.sin(pc.yaw), 0, -Math.cos(pc.yaw))
@@ -77,8 +77,13 @@ export function updatePlayer(game, dt) {
   if (inp.action("back") || inp.down("ArrowDown")) wish.sub(fwd)
   if (inp.action("right") || inp.down("ArrowRight")) wish.add(right)
   if (inp.action("left") || inp.down("ArrowLeft")) wish.sub(right)
+  // an analog stick (gamepad or touch) steers precisely
+  const ax = inp.axis
+  if (Math.abs(ax.x) + Math.abs(ax.y) > 0.15) {
+    wish.set(0, 0, 0).addScaledVector(fwd, ax.y).addScaledVector(right, ax.x)
+  }
   const moving = wish.lengthSq() > 0
-  if (moving) wish.normalize()
+  if (moving && wish.lengthSq() > 1) wish.normalize()
   const sprint = moving && (inp.action("sprint") || inp.down("ShiftRight")) && c.fatigue > 3 && !pc.sneaking
   pc.sprinting = sprint
   let speed = moveSpeed(c) * (sprint ? 1.65 : 1) * (pc.sneaking ? 0.5 : 1) * (pc.swimming ? 0.6 : 1) * (pc.wading ? 0.6 : 1) * (c.fatigue <= 0 ? 0.7 : 1)
