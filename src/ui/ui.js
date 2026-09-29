@@ -327,7 +327,7 @@ export class UI {
     this.h.spell.innerHTML = sp ? `<span class="ic">✦</span>${esc(sp.name)} <span class="dim">${sp.power ? (c.powersUsed[sp.id] ? "used" : "power") : sp.cost}</span>` : `<span class="ic">✦</span><span class="dim">no spell</span>`
     this.h.effects.innerHTML = c.effects.filter(e => e.type !== "bound" || true).map(e => `<span class="eff">${esc(e.label || e.type)} ${Math.ceil(e.remaining)}s</span>`).join("") + (c.poison > 0 ? `<span class="eff bad">Poisoned</span>` : "")
     const t = this.target
-    this.h.prompt.textContent = t && !this.modal ? `E — ${t.type === "npc" ? "Talk to" : t.type === "door" ? "Enter" : t.type === "corpse" ? "Search" : t.type === "chest" ? "Open" : t.type === "sack" ? "Search" : "Use"} ${t.name}` : ""
+    this.h.prompt.textContent = t && !this.modal ? `E — ${t.verb ? t.verb : t.type === "npc" ? "Talk to" : t.type === "door" ? "Enter" : t.type === "corpse" ? "Search" : t.type === "chest" ? "Open" : t.type === "sack" ? "Search" : "Use"} ${t.name}` : ""
     const tg = g.lastTarget
     if (tg && g.lastTargetT > 0 && !tg.dead) {
       this.h.target.classList.remove("hidden")
@@ -342,7 +342,7 @@ export class UI {
     const hour = g.hourOfDay()
     const hh = String(Math.floor(hour)).padStart(2, "0")
     const mm = String(Math.floor((hour % 1) * 60)).padStart(2, "0")
-    const place = g.area.kind === "overworld" ? REGIONS[g.world.regionAt(g.pc.pos.x, g.pc.pos.z)].name + (g.area.townAt(g.pc.pos.x, g.pc.pos.z, 10) ? ` · ${g.area.townAt(g.pc.pos.x, g.pc.pos.z, 10).name}` : "") : `${g.area.dungeon.name} ${g.area.levelIndex + 1}/${g.area.dungeon.levels}`
+    const place = g.area.kind === "interior" ? `${g.area.layout.name}, ${g.area.town.name}` : g.area.kind === "overworld" ? REGIONS[g.world.regionAt(g.pc.pos.x, g.pc.pos.z)].name + (g.area.townAt(g.pc.pos.x, g.pc.pos.z, 10) ? ` · ${g.area.townAt(g.pc.pos.x, g.pc.pos.z, 10).name}` : "") : `${g.area.dungeon.name} ${g.area.levelIndex + 1}/${g.area.dungeon.levels}`
     this.h.status.textContent = `Day ${Math.floor(g.time / 24) + 1} ${hh}:${mm} · ${place}${g.area.kind === "overworld" && g.weather !== "clear" ? " · " + g.weather : ""}`
     this.drawMinimap()
     this.drawQuickbar()
@@ -381,6 +381,8 @@ export class UI {
     let marks = []
     if (g.area.kind === "overworld") {
       marks = [...nearbyPlaces(g, px, pz), ...questTargets(g)]
+    } else if (g.area.kind === "interior") {
+      marks = [{ x: g.area.exitPos.x, z: g.area.exitPos.z, label: "Door", kind: "place" }]
     } else {
       const a = g.area
       const seen = cell => cell && a.explored[cell.y * a.lvl.w + cell.x]
@@ -466,6 +468,17 @@ export class UI {
         img.data[i] = r; img.data[i + 1] = gg; img.data[i + 2] = b; img.data[i + 3] = 255
       }
     ctx.putImageData(img, 0, 0)
+    // roads
+    ctx.strokeStyle = "rgba(92,66,38,0.85)"
+    ctx.lineWidth = Math.max(1, S / 400)
+    for (const r of world.roads || []) {
+      ctx.beginPath()
+      r.pts.forEach(([x, z], i) => {
+        const [mx, my] = [((x + half) / world.size) * S, ((z + half) / world.size) * S]
+        i ? ctx.lineTo(mx, my) : ctx.moveTo(mx, my)
+      })
+      ctx.stroke()
+    }
     this.worldMap = cv
     this.worldMapSeed = world.seed
   }
@@ -500,6 +513,32 @@ export class UI {
       if (big) {
         ctx.fillStyle = "#e8dcc0"
         ctx.fillText(d.name, px + 6, py + 4)
+      }
+    }
+    const icon = { wreck: "#b0a080", stronghold: "#d0c0a0", propylon: "#9ab8ff", ghostfence: "#60ffb0" }
+    for (const l of world.landmarks || []) {
+      if (!g.landmarks?.found.includes(l.id)) continue
+      const [x, y] = this.toMap(l.x, l.z, S)
+      const px = x * scale + ox
+      const py = y * scale + oy
+      if (l.type === "ghostfence") {
+        const [cx, cy] = this.toMap(l.cx, l.cz, S)
+        ctx.strokeStyle = "rgba(96,255,176,0.55)"
+        ctx.beginPath()
+        ctx.arc(cx * scale + ox, cy * scale + oy, (l.r / world.size) * S * scale, 0, Math.PI * 2)
+        ctx.stroke()
+      }
+      const r = big ? 4.5 : 3
+      ctx.fillStyle = icon[l.type]
+      ctx.beginPath()
+      ctx.moveTo(px, py - r)
+      ctx.lineTo(px + r, py)
+      ctx.lineTo(px, py + r)
+      ctx.lineTo(px - r, py)
+      ctx.fill()
+      if (big) {
+        ctx.fillStyle = "#e8dcc0"
+        ctx.fillText(l.name, px + 6, py + 4)
       }
     }
     for (const m of questTargets(g)) {
@@ -578,6 +617,18 @@ export class UI {
           ctx.fillRect((ex - px) * scale + W / 2 - 2, (ey - py) * scale + W / 2 - 2, 4, 4)
         }
       }
+    } else if (g.area.kind === "interior") {
+      // the room from above: walls, furniture and the door
+      const L = g.area.layout
+      const cs = Math.min(10, (W - 20) / Math.max(L.W, L.D))
+      const ox = W / 2 - g.pc.pos.x * cs
+      const oy = W / 2 - g.pc.pos.z * cs
+      ctx.fillStyle = "#6a5a44"
+      ctx.fillRect(ox - (L.W / 2) * cs, oy - (L.D / 2) * cs, L.W * cs, L.D * cs)
+      ctx.fillStyle = "#3a2e22"
+      for (const f of L.furniture) if (f.type !== "rug" && f.type !== "banner" && f.type !== "candles") ctx.fillRect(ox + f.x * cs - 3, oy + f.z * cs - 3, 6, 6)
+      ctx.fillStyle = "#e0e0a0"
+      ctx.fillRect(ox - 0.8 * cs, oy + (-L.D / 2) * cs - 2, 1.6 * cs, 4)
     } else {
       const a = g.area
       const lvl = a.lvl
@@ -766,6 +817,15 @@ export class UI {
 
   render_map(body) {
     const g = this.game
+    if (g.area.kind === "interior") {
+      // show the world map with you at the door you came in by
+      const r = g.returnPos
+      const saved = g.pc.pos.clone()
+      g.pc.pos.set(r.x, r.y, r.z)
+      this.render_map_world(body)
+      g.pc.pos.copy(saved)
+      return
+    }
     if (g.area.kind === "dungeon") {
       body.innerHTML = `<div class="mapview"><canvas width="560" height="560"></canvas><p class="dim">${esc(g.area.dungeon.name)} — level ${g.area.levelIndex + 1}</p></div>`
       const cv = body.querySelector("canvas")
@@ -783,8 +843,14 @@ export class UI {
       this.drawArrow(ctx, (g.pc.pos.x / CELL) * cs, (g.pc.pos.z / CELL) * cs, g.pc.yaw, 9)
       return
     }
+    this.render_map_world(body)
+  }
+
+  render_map_world(body) {
+    const g = this.game
+    const world = g.world
     if (!this.worldMap) this.buildWorldMap()
-    body.innerHTML = `<div class="mapview"><canvas width="640" height="640"></canvas><p class="dim">■ towns · ● places · ◎ quest targets · red: the Citadel</p></div>`
+    body.innerHTML = `<div class="mapview"><canvas width="640" height="640"></canvas><p class="dim">■ towns · ● places · ◆ landmarks · ◎ quest targets · red: the Citadel</p></div>`
     const cv = body.querySelector("canvas")
     const ctx = cv.getContext("2d")
     ctx.drawImage(this.worldMap, 0, 0, 640, 640)
@@ -910,7 +976,7 @@ export class UI {
       <div class="dlg-body">
         <div class="dlg-main"></div>
         <div class="dlg-topics">${topics.map(t => `<button class="topic" data-act="topic" data-arg="${t.id}">${esc(t.label)}</button>`).join("")}
-          <hr>${services.map(s => `<button class="svc" data-act="svc" data-arg="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join("")}
+          <hr>${services.map(s => `<button class="svc" data-act="svc" data-arg="${s}">${{ boat: "Sail", guide: "Teleport", travel: "Travel" }[s] || s[0].toUpperCase() + s.slice(1)}</button>`).join("")}
           <button class="svc" data-act="svc" data-arg="persuade">Persuasion</button>
           <button class="svc" data-act="close">Goodbye</button></div>
       </div></div>`
@@ -1012,9 +1078,11 @@ export class UI {
         main.innerHTML = `<h3>Healing</h3><p>Health ${Math.ceil(c.health)}/${maxHealth(c)}${c.poison > 0 ? ", poisoned" : ""}.</p><div class="row"><button data-act="heal">Heal me</button></div>${back}`
         bind(main, { heal: () => say(D.heal(g, npc)), back: () => say() })
         return
-      case "travel": {
-        const opts = D.travelOptions(g, npc)
-        main.innerHTML = `<h3>Silt Strider destinations</h3><div class="list">${opts.map((o, k) => `<div class="item" data-act="go" data-arg="${k}"><span>${esc(o.town.name)} <span class="dim">${REGIONS[o.town.region].name}, ${o.hours}h</span></span><span class="gold">${o.price}</span></div>`).join("")}</div>${back}`
+      case "travel":
+      case "boat":
+      case "guide": {
+        const opts = D.travelOptions(g, npc, this.dlgView)
+        main.innerHTML = `<h3>${D.TRAVEL_MODES[this.dlgView].title}</h3><div class="list">${opts.map((o, k) => `<div class="item" data-act="go" data-arg="${k}"><span>${esc(o.town.name)} <span class="dim">${REGIONS[o.town.region].name}, ${o.hours}h</span></span><span class="gold">${o.price}</span></div>`).join("")}</div>${back}`
         bind(main, {
           go: k => {
             const r = D.travel(g, opts[Number(k)])
@@ -1041,6 +1109,21 @@ export class UI {
   }
 
   // ---------------- containers ----------------
+
+  // A short list of choices (propylon destinations, and the like).
+  openChoice(title, text, options) {
+    this.openModal("choice")
+    this.win.innerHTML = `<div class="panel container"><div class="dlg-head"><h2>${esc(title)}</h2><button class="close" data-act="close">✕</button></div>
+      <p>${esc(text)}</p><div class="list">${options.map((o, k) => `<div class="item" data-act="pick" data-arg="${k}"><span>${esc(o.label)}</span></div>`).join("")}</div>
+      <div class="row end"><button data-act="close">Cancel</button></div></div>`
+    bind(this.win, {
+      close: () => this.closeModal(),
+      pick: k => {
+        this.closeModal()
+        options[Number(k)].act()
+      },
+    })
+  }
 
   openContainer(title, ref) {
     this.openModal("container")

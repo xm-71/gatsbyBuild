@@ -13,6 +13,7 @@ const REGION_SPLAT = {
   redMountain: [0, 0.5, 0.2, 0, 0, 0.3, 0],
   azurasCoast: [0.3, 0, 0.45, 0.15, 0, 0, 0.1],
   molagAmur: [0, 0.3, 0.1, 0, 0, 0.6, 0],
+  frostholm: [0, 0, 0.18, 0, 0, 0, 0.04, 0.78],
 }
 const REGION_TINT = {
   ascadian: [1.0, 1.06, 0.92],
@@ -23,6 +24,7 @@ const REGION_TINT = {
   redMountain: [1.08, 0.92, 0.86],
   azurasCoast: [1, 1, 1.02],
   molagAmur: [1.05, 0.9, 0.86],
+  frostholm: [1, 1, 1.02],
 }
 
 const UV_SCALE = 5
@@ -36,13 +38,13 @@ export function computeTerrainChunks(world, R) {
   const per = R / CH
   const chunks = []
   const regionSplat = (x, z) => {
-    const out = [0, 0, 0, 0, 0, 0, 0]
+    const out = [0, 0, 0, 0, 0, 0, 0, 0] // grass ash rock sand | mud volcanic dirt | snow
     const tint = [0, 0, 0]
     const offs = [[0, 0], [6, 0], [-6, 0], [0, 6], [0, -6]]
     for (const [ox, oz] of offs) {
       const reg = world.regionAt(x + ox, z + oz)
       const s = REGION_SPLAT[reg]
-      for (let i = 0; i < 7; i++) out[i] += s[i] / offs.length
+      for (let i = 0; i < 8; i++) out[i] += (s[i] || 0) / offs.length
       const t = REGION_TINT[reg]
       for (let i = 0; i < 3; i++) tint[i] += t[i] / offs.length
     }
@@ -59,6 +61,7 @@ export function computeTerrainChunks(world, R) {
       const col = new Float32Array(count * 3)
       const sA = new Float32Array(count * 4)
       const sB = new Float32Array(count * 4)
+      const sC = new Float32Array(count * 2) // snow, road
       for (let j = 0; j < V; j++) {
         for (let i = 0; i < V; i++) {
           const k = j * V + i
@@ -91,18 +94,18 @@ export function computeTerrainChunks(world, R) {
           w[2] += Math.max(0, n - 0.3) * 0.6
           // steep ground is bare rock
           const rockT = Math.min(1, Math.max(0, (slope - 0.12) * 5))
-          for (let q = 0; q < 7; q++) w[q] *= 1 - rockT
+          for (let q = 0; q < 8; q++) w[q] *= 1 - rockT
           w[2] += rockT
           // beaches and sea bed
           if (h < 1.8) {
             const s = Math.min(1, (1.8 - h) / 1.2)
-            for (let q = 0; q < 7; q++) w[q] *= 1 - s
+            for (let q = 0; q < 8; q++) w[q] *= 1 - s
             w[world.regionAt(x, z) === "bitterCoast" ? 4 : 3] += s
           }
           let lava = 0
           if (world.lavaAt(x, z) && slope < 0.35) {
             lava = 1
-            for (let q = 0; q < 7; q++) w[q] *= 0.2
+            for (let q = 0; q < 8; q++) w[q] *= 0.2
             w[5] += 0.8
           }
           const sum = w.reduce((a, b) => a + b, 0) || 1
@@ -114,6 +117,8 @@ export function computeTerrainChunks(world, R) {
           sB[k * 4 + 1] = w[5] / sum
           sB[k * 4 + 2] = w[6] / sum
           sB[k * 4 + 3] = lava
+          sC[k * 2] = w[7] / sum
+          sC[k * 2 + 1] = world.roadAt ? world.roadAt(x, z) : 0
           const shade = 0.9 + n * 0.25 - (h < SEA_LEVEL ? 0.25 : 0)
           col[k * 3] = tint[0] * shade
           col[k * 3 + 1] = tint[1] * shade
@@ -131,7 +136,7 @@ export function computeTerrainChunks(world, R) {
           idx[p++] = a; idx[p++] = c; idx[p++] = b
           idx[p++] = c; idx[p++] = d; idx[p++] = b
         }
-      chunks.push({ pos, nor, uv, col, sA, sB, idx })
+      chunks.push({ pos, nor, uv, col, sA, sB, sC, idx })
     }
   }
 

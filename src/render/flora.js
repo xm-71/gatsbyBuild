@@ -45,6 +45,7 @@ function M(key) {
     case "leaves": m = sway(new THREE.MeshLambertMaterial({ map: cardTexture("leaves"), alphaTest: 0.45, side: THREE.DoubleSide }), 0.02); break
     case "fern": m = sway(new THREE.MeshLambertMaterial({ map: cardTexture("fern"), alphaTest: 0.45, side: THREE.DoubleSide }), 0.05); break
     case "grass": m = sway(new THREE.MeshLambertMaterial({ map: cardTexture("grass"), alphaTest: 0.4, side: THREE.DoubleSide }), 0.09); break
+    case "snowneedles": m = sway(new THREE.MeshLambertMaterial({ map: cardTexture("needles"), alphaTest: 0.45, side: THREE.DoubleSide, color: 0xc8d8d0 }), 0.008); break
     case "trama": m = new THREE.MeshLambertMaterial({ map: t("bark").map, color: 0x7a3a34 }); break
   }
   mats[key] = m
@@ -127,6 +128,12 @@ function gashTree(rng) {
     { geo: worldUV(normalize(trunk), 2), mat: M("bark") },
     { geo: merge(cards), mat: M("needles") },
   ]
+}
+
+// snow-dusted pine for the frozen isle: a gash conifer with frosted needles
+function pine(rng) {
+  const [trunk, needles] = gashTree(rng)
+  return [trunk, { geo: needles.geo, mat: M("snowneedles") }]
 }
 
 function swampTree(rng) {
@@ -213,9 +220,9 @@ function rock(rng, big) {
   return [{ geo: worldUV(normalize(g), big ? 3 : 1.5), mat: M("rock"), tint: true }]
 }
 
-const BUILDERS = { parasol, gashTree, swampTree, deadTree, shrub, grass: grassTuft, trama, rock: r => rock(r, false), boulder: r => rock(r, true) }
+const BUILDERS = { parasol, gashTree, pine, swampTree, deadTree, shrub, grass: grassTuft, trama, rock: r => rock(r, false), boulder: r => rock(r, true) }
 const TINTED = { leaves: true, needles: true, fern: true, grass: true, rock: true }
-const TRUNK_RADIUS = { parasol: 0.7, gashTree: 0.4, swampTree: 0.55, deadTree: 0.4, boulder: 2.3 }
+const TRUNK_RADIUS = { parasol: 0.7, gashTree: 0.4, pine: 0.4, swampTree: 0.55, deadTree: 0.4, boulder: 2.3 }
 const VARIANTS = 3
 
 export function buildFlora(world, colliders) {
@@ -416,6 +423,7 @@ export class GrassField {
         const y = w.heightAt(x, z)
         if (y < 1.6 || w.slopeAt(x, z) > 0.6) continue
         if (this.towns.some(t => Math.hypot(t.x - x, t.z - z) < t.radius * 0.6)) continue
+        if (w.roadAt && w.roadAt(x, z) > 0.25) continue
         q.setFromAxisAngle(up, r1 * 6.28)
         s.setScalar(0.65 + r2 * 0.6)
         p.set(x, y - 0.05, z)

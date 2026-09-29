@@ -7,7 +7,7 @@ import { REGIONS } from "../logic/worldgen.js"
 import { getAttr, getSkill, maxHealth, addItem, removeItem, raiseSkill } from "../logic/character.js"
 import { buyPrice, sellPrice, persuadeChance } from "../logic/combat.js"
 import { generateQuest, canPromote } from "../logic/quests.js"
-import { randomPotion, randomMisc, randomWeapon, randomArmor, makeLockpick, makeArrows, makeBolts, makeQuestItem, makeWeapon, makeRepairTool, randomAmmo, randomPoison, repairCost, hasCondition } from "../logic/items.js"
+import { randomPotion, randomMisc, randomWeapon, randomArmor, makeLockpick, makeArrows, makeBolts, makeQuestItem, makeWeapon, makeRepairTool, randomAmmo, randomPoison, repairCost, hasCondition, makeArtifact } from "../logic/items.js"
 import { DUNGEON_THEMES } from "../logic/dungeongen.js"
 
 const GREAT_HOUSES = ["redoran", "hlaalu", "telvanni"]
@@ -32,6 +32,9 @@ export function greeting(game, npc) {
   const d = disposition(game, npc)
   const race = RACES[c.race].name
   const rng = new RNG(`${npc.seed}:${Math.floor(game.time)}`)
+  if (npc.role === "elder" && !(game.isle?.stage > 0)) return `A southerner, on our isle? The ancestors send strange visitors. Sit by the fire, ${c.name}.`
+  if (npc.role === "pilgrim") return rng.pick([`Blessings of the Three upon you, ${c.name}. I walk to the shrines of the saints.`, "Walk with me a while, if you like. The road is long and the Ashlands are cruel.", "Almsivi keep you. Have you seen the shrine near here?"])
+  if (npc.title === "Caravan Merchant") return "You came just in time. Those bandits meant to take everything."
   if (npc.role === "blade" && game.main.stage === 0) return `You're ${c.name}? Good. I was told to expect you. Sit — we have much to discuss about your future, and the dreams that trouble this island.`
   if (d < 30) return rng.pick([`What do you want, ${c.race === "dunmer" ? "sera" : "n'wah"}?`, `Hmph. An outlander. Make it quick.`, `S'wit. What?`])
   if (d < 55) return rng.pick([`Yes, ${race}?`, `Greetings, outlander. What do you need?`, `Something I can help you with?`, `Mm. Speak.`])
@@ -42,6 +45,12 @@ export function topics(game, npc) {
   const c = game.char
   const list = []
   const town = game.world.towns[npc.townId]
+  if (npc.role === "elder") {
+    const st = game.isle?.stage || 0
+    if (st === 0) list.push({ id: "isle:start", label: "The restless barrow" })
+    else if (st === 1 && !c.inventory.some(i => i.questId === "isle")) list.push({ id: "isle:progress", label: "The barrow" })
+    else if (st <= 2 && c.inventory.some(i => i.questId === "isle")) list.push({ id: "isle:finish", label: "The Horn of the Ancestors" })
+  }
   if (npc.role === "blade") {
     if (game.main.stage === 0) list.push({ id: "main:start", label: "Dreams of the Sixth House" })
     else if (game.main.stage === 1) list.push({ id: "main:tools", label: "Kagrenac's Tools" })
@@ -75,6 +84,8 @@ export function services(game, npc) {
   if (role === "smith" || (role === "guildmaster" && (npc.faction === "fightersGuild" || npc.faction === "legion"))) s.push("repair")
   if (role === "priest") s.push("healing", "spells")
   if (role === "caravaner") s.push("travel")
+  if (role === "shipmaster") s.push("boat")
+  if (role === "guide") s.push("guide")
   if (role === "guildmaster" && F) for (const x of F.services) if (!s.includes(x)) s.push(x)
   if (role === "trader" || role === "smith" || role === "priest") s.push("training")
   return [...new Set(s)]
@@ -110,6 +121,8 @@ export function handleTopic(game, npc, id) {
   const town = world.towns[npc.townId]
   const rng = new RNG(`${npc.seed}:${id}:${Math.floor(game.time / 6)}`)
   const d = disposition(game, npc)
+
+  if (id.startsWith("isle:")) return isleTopic(game, npc, id)
 
   if (id === "rumors") {
     const unknown = world.dungeons.filter(x => !x.discovered && !x.citadel)
@@ -243,6 +256,35 @@ function completeQuest(game, q, npc) {
 }
 
 // ---------- barter ----------
+
+// The frozen isle's story: the village elder asks you to quiet a draugr lord
+// and bring back the Horn of the Ancestors he was buried with.
+function isleTopic(game, npc, id) {
+  const w = game.world
+  const barrow = w.dungeons.find(d => d.isleStory)
+  const isle = (game.isle ||= { stage: 0 })
+  if (id === "isle:start") {
+    isle.stage = 1
+    barrow.discovered = true
+    game.addJournal(`${npc.name}, elder of the village on the frozen isle, told me the dead of ${barrow.name} have woken. A draugr lord walks there with the Horn of the Ancestors. If I bring the Horn back, the village will honour me.`)
+    return `You came across the strait? Then you are stronger than you look. Listen: the dead in ${barrow.name} have woken. Their lord was buried with the Horn of the Ancestors, and while he holds it the draugr will not rest. Put him down and bring me the Horn. (${barrow.name} is marked on your map.)`
+  }
+  if (id === "isle:progress") return `The draugr lord still walks in ${barrow.name}. Kill him, and bring back the Horn.`
+  if (id === "isle:finish") {
+    const horn = game.char.inventory.find(i => i.questId === "isle")
+    if (horn) removeItem(game.char, horn)
+    isle.stage = 3
+    const reward = makeArtifact("stalhrim")
+    addItem(game.char, reward)
+    game.onItemTaken?.(reward)
+    game.char.gold += 300
+    for (const n of w.towns.find(t => t.isle)?.npcs || []) game.dispositionMod.set(n.id, (game.dispositionMod.get(n.id) || 0) + 15)
+    game.addJournal(`I returned the Horn of the Ancestors to ${npc.name}. The village gave me a blade of enchanted stalhrim ice and named me a friend of the isle.`)
+    game.audio.sting("levelup")
+    return `The Horn... and the barrow is quiet. The ancestors will sleep now. Take this blade — stalhrim, ice that never melts, forged for such a day. You are a friend of this village, now and always. (+300 gold)`
+  }
+  return ""
+}
 
 export function merchantStock(game, npc) {
   const week = Math.floor(game.time / (24 * 7))
@@ -388,11 +430,23 @@ export function heal(game, npc) {
   return price ? `You are healed for ${price} gold.` : "The Temple heals its own freely."
 }
 
-export function travelOptions(game, npc) {
+// mode: "travel" (silt strider), "boat" (between harbours) or "guide"
+// (Mages Guild teleport, instant).
+export const TRAVEL_MODES = {
+  travel: { title: "Silt Strider destinations", ok: t => !t.isle, per: 12, speed: 60, base: 10, arrive: "aboard the silt strider" },
+  boat: { title: "Ports of call", ok: t => !!t.dock, per: 10, speed: 75, base: 12, arrive: "at sea" },
+  guide: { title: "Guild Guide destinations", ok: t => t.buildings.some(b => b.label === "Mages Guild"), per: 0, speed: 0, base: 20, arrive: "" },
+}
+
+export function travelOptions(game, npc, mode = "travel") {
   const town = game.world.towns[npc.townId]
+  const M = TRAVEL_MODES[mode]
   return game.world.towns
-    .filter(t => t.id !== town.id)
-    .map(t => ({ town: t, price: Math.round(Math.hypot(t.x - town.x, t.z - town.z) / 12) + 10, hours: Math.round(Math.hypot(t.x - town.x, t.z - town.z) / 60) + 1 }))
+    .filter(t => t.id !== town.id && M.ok(t))
+    .map(t => {
+      const d = Math.hypot(t.x - town.x, t.z - town.z)
+      return { town: t, mode, price: Math.round(M.per ? d / M.per : 0) + M.base, hours: M.speed ? Math.round(d / M.speed) + 1 : 0 }
+    })
 }
 
 export function travel(game, opt) {
@@ -401,10 +455,23 @@ export function travel(game, opt) {
   c.gold -= opt.price
   game.advanceTime(opt.hours)
   const t = opt.town
-  game.pc.pos.set(t.port.x - Math.cos(t.port.angle) * 7, t.y, t.port.z - Math.sin(t.port.angle) * 7)
+  let x = t.port.x - Math.cos(t.port.angle) * 7
+  let z = t.port.z - Math.sin(t.port.angle) * 7
+  if (opt.mode === "boat" && t.dock) {
+    x = t.dock.x - Math.cos(t.dock.angle) * 3
+    z = t.dock.z - Math.sin(t.dock.angle) * 3
+  } else if (opt.mode === "guide") {
+    const g = t.buildings.find(b => b.label === "Mages Guild")
+    x = g.x - Math.cos(g.angle) * (g.d / 2 + 4)
+    z = g.z - Math.sin(g.angle) * (g.d / 2 + 4)
+  }
+  game.pc.pos.set(x, game.world.heightAt(x, z), z)
   game.pc.vel.set(0, 0, 0)
   game.knownTowns.add(t.id)
-  game.msg(`After ${opt.hours} hours aboard the silt strider, you arrive in ${t.name}.`, "#f0d890")
+  if (opt.mode === "guide") {
+    game.audio.play("spell", { element: "restore" })
+    game.msg(`The guild guide's spell carries you to ${t.name} in an instant.`, "#a0c0ff")
+  } else game.msg(`After ${opt.hours} hours ${TRAVEL_MODES[opt.mode].arrive}, you arrive in ${t.name}.`, "#f0d890")
   return null
 }
 

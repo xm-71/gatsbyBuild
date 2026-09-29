@@ -1,3 +1,4 @@
+import { addFeatures, cornerHeights } from "./dungeonFeatures.js"
 import { RNG } from "../core/rng.js"
 import { creaturesFor } from "../data/creatures.js"
 
@@ -11,6 +12,7 @@ export const DUNGEON_THEMES = {
   dwemer: { name: "Dwemer Ruin", habitat: "dwemer", lootTag: "dwemer" },
   daedric: { name: "Daedric Shrine", habitat: "daedric", lootTag: "daedric" },
   citadel: { name: "Citadel", habitat: "citadel", lootTag: "citadel" },
+  barrow: { name: "Nord Barrow", habitat: "barrow", lootTag: "tomb" },
 }
 
 function carveRoom(grid, w, r) {
@@ -158,6 +160,7 @@ const PROPS = {
   dwemer: ["pipe", "gear", "pipe", "crate", "lamp"],
   daedric: ["statue", "brazier", "bones", "altar"],
   citadel: ["fleshpillar", "brazier", "bones", "altar"],
+  barrow: ["urn", "coffin", "bones", "candles", "statue"],
 }
 
 export function generateDungeonLevel({ seed, type, tier, level, levels, bossLevel = true, relic = null, citadel = false }) {
@@ -173,6 +176,7 @@ export function generateDungeonLevel({ seed, type, tier, level, levels, bossLeve
       dwemer: { minRooms: 6, maxRooms: 9, minSize: 5, maxSize: 9, corridor: 2 },
       daedric: { minRooms: 5, maxRooms: 8, minSize: 5, maxSize: 10, corridor: 2 },
       citadel: { minRooms: 6, maxRooms: 9, minSize: 5, maxSize: 10, corridor: 2 },
+      barrow: { minRooms: 6, maxRooms: 9, minSize: 4, maxSize: 7, corridor: 1 },
     }[type]
     ;({ grid, rooms } = roomsAndCorridors(rng, w, h, opts))
   }
@@ -243,7 +247,7 @@ export function generateDungeonLevel({ seed, type, tier, level, levels, bossLeve
   }
   const lights = rooms.filter(() => rng.chance(0.7)).map(r => roomCenter(r))
 
-  return {
+  const lvl = {
     w,
     h,
     grid,
@@ -257,7 +261,11 @@ export function generateDungeonLevel({ seed, type, tier, level, levels, bossLeve
     lights,
     type,
     level,
+    goalCell: goal,
   }
+  if (type !== "citadel" || level > 0) addFeatures(lvl, rng.fork("features"), { tier, level, chestsOut: chests, spawns, props })
+  lvl.corners = cornerHeights(lvl)
+  return lvl
 }
 
 export function isFloor(lvl, gx, gy) {

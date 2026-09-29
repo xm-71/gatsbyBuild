@@ -9,7 +9,7 @@ import { bossName } from "../logic/names.js"
 import { CREATURES } from "../data/creatures.js"
 import { RACES, BIRTHSIGNS, SKILLS } from "../data/stats.js"
 import { getSpell } from "../data/spells.js"
-import { OverworldArea, DungeonArea } from "./areas.js"
+import { OverworldArea, DungeonArea, InteriorArea } from "./areas.js"
 import { Projectile, ELEMENT_COLOR } from "./actors.js"
 import { Input } from "./input.js"
 import { Audio } from "./audio.js"
@@ -162,6 +162,7 @@ export class Game {
     this.audio.ensure()
     await this.ensureWorld(save.seed)
     restoreRun(this, save)
+    for (const [k, st] of Object.entries(this.landmarks.state)) if (k[0] === "c" && st.opened) this.overworld.seabed?.userData.open(Number(k.slice(1)))
     this.viewmodel.setSkin(RACES[this.char.race].skin)
     this.pc = this.newPlayerController(save.pc.x, save.pc.y, save.pc.z, save.pc.yaw)
     this.pc.pitch = save.pc.pitch || 0
@@ -171,6 +172,10 @@ export class Game {
       const d = this.world.dungeons[save.area.id]
       this.returnPos = save.area.returnPos
       this.loadDungeonLevel(d, save.area.level, false, true)
+      this.pc.pos.set(save.pc.x, save.pc.y, save.pc.z)
+    } else if (save.area.kind === "interior") {
+      this.enterInterior(save.area.town, save.area.building, true)
+      this.returnPos = save.area.returnPos
       this.pc.pos.set(save.pc.x, save.pc.y, save.pc.z)
     }
     this.beginPlay()
@@ -200,6 +205,8 @@ export class Game {
     this.dungeonState = {}
     this.main = { stage: 0 }
     this.knownTowns = new Set([this.world.startTown.id])
+    this.landmarks = { found: [], state: {} } // discovered landmarks, their chests and garrisons
+    this.isle = { stage: 0 } // the frozen isle's story
     this.trainedThisLevel = 0
     this.merchantStock = new Map()
     this.dispositionMod = new Map()
@@ -221,7 +228,7 @@ export class Game {
     this.projectiles = []
     this.area = area
     area.scene.environment = this.envMap
-    area.scene.environmentIntensity = area.kind === "dungeon" ? 0.25 : 0.6
+    area.scene.environmentIntensity = area.kind === "overworld" ? 0.6 : 0.25
     area.scene.add(this.camera)
     this.particles.attach(area.scene)
     area.scene.updateMatrixWorld()
@@ -257,13 +264,16 @@ export class Game {
     const R = { ashlands: 0.35, redMountain: 0.6, molagAmur: 0.4 }[region] || 0
     const r = Math.random()
     let w = "clear"
-    if (r < R) w = region === "redMountain" && Math.random() < 0.3 ? "blight" : "ash"
-    else if (r < R + (["bitterCoast", "ascadian", "westGash"].includes(region) ? 0.25 : 0.08)) w = "rain"
+    if (region === "frostholm") {
+      // the frozen isle: snow, blizzards, and the odd clear cold day
+      w = r < 0.4 ? "snow" : r < 0.55 ? "blizzard" : r < 0.72 ? "cloudy" : r < 0.8 ? "fog" : "clear"
+    } else if (r < R) w = region === "redMountain" && Math.random() < 0.3 ? "blight" : "ash"
+    else if (r < R + (["bitterCoast", "ascadian", "westGash"].includes(region) ? 0.25 : 0.08)) w = Math.random() < 0.35 ? "storm" : "rain"
     else if (r < R + 0.35) w = "cloudy"
     else if (r < R + 0.42) w = "fog"
     if (w !== this.weather) {
       this.weather = w
-      const txt = { ash: "An ash storm is blowing in.", blight: "A blight storm rolls off Red Mountain!", rain: "It begins to rain.", fog: "Fog settles over the land.", cloudy: "Clouds gather.", clear: "The sky clears." }[w]
+      const txt = { ash: "An ash storm is blowing in.", blight: "A blight storm rolls off Red Mountain!", rain: "It begins to rain.", storm: "Thunder rumbles. A storm is coming.", snow: "Snow begins to fall.", blizzard: "A blizzard howls in off the sea!", fog: "Fog settles over the land.", cloudy: "Clouds gather.", clear: "The sky clears." }[w]
       if (this.area.kind === "overworld") this.msg(txt, "#b0a890")
     }
   }
@@ -334,8 +344,8 @@ export class Game {
     s.time += dt
     const cam = this.camera
     const camPos = cam.getWorldPosition(new THREE.Vector3())
-    s.ao = this.area.kind === "dungeon" ? 1 : 0.85
-    s.bloom = this.area.kind === "dungeon" ? 0.2 : 0.35
+    s.ao = this.area.kind === "overworld" ? 0.85 : 1
+    s.bloom = this.area.kind === "dungeon" ? 0.2 : this.area.kind === "interior" ? 0.25 : 0.35
     s.under = this.area.kind === "overworld" && camPos.y < SEA_LEVEL - 0.05 ? 1 : 0
     s.sunAmt = 0
     if (this.area.kind !== "overworld" || s.under) return
@@ -382,7 +392,10 @@ export class Game {
     if (this.area.kind === "overworld") {
       this.updateWeather(dt)
       this.area.sky.weather = this.weather
-      const { day } = this.area.sky.update(dt, this.hourOfDay(), this.camera, this.area.fogColor(this.pc.pos.x, this.pc.pos.z), this.area.scene.fog)
+      const rmd = Math.hypot(this.pc.pos.x - this.world.redMountain.x, this.pc.pos.z - this.world.redMountain.z)
+      const redness = Math.max(0, Math.min(1, (320 - rmd) / 170))
+      if (!this.area.sky.onThunder) this.area.sky.onThunder = d => setTimeout(() => this.audio.play("thunder", { dist: d }), (d / 343) * 1000)
+      const { day } = this.area.sky.update(dt, this.hourOfDay(), this.camera, this.area.fogColor(this.pc.pos.x, this.pc.pos.z), this.area.scene.fog, redness)
       this.daylight = day
       this.area.scene.background = this.area.sky.skyColor
       if (this.pc.underwater) {
@@ -425,7 +438,7 @@ export class Game {
       this.damagePlayer(14 * dt, { element: "fire", quiet: true })
       if (Math.random() < dt * 2) this.msg("The lava burns!", "#ff8a4a")
     }
-    this.playerLight.intensity = hasEffect(c, "light") ? 60 : this.area.kind === "dungeon" ? 22 : RACES[c.race].nightEye && this.isNight() ? 12 : 0
+    this.playerLight.intensity = hasEffect(c, "light") ? 60 : this.area.kind === "dungeon" ? 22 : this.area.kind === "interior" ? 5 : RACES[c.race].nightEye && this.isNight() ? 12 : 0
     this.playerLight.distance = hasEffect(c, "light") ? 34 : 16
     this.lastTargetT -= dt
     this.saveT = (this.saveT || 0) + dt
@@ -438,6 +451,14 @@ export class Game {
       if (!this.knownTowns.has(t.id) && Math.hypot(t.x - this.pc.pos.x, t.z - this.pc.pos.z) < t.radius + 30) {
         this.knownTowns.add(t.id)
         this.msg(`You have discovered ${t.name}.`, "#f0d890")
+        this.audio.sting("discover")
+      }
+    }
+    for (const l of this.world.landmarks || []) {
+      if (this.landmarks.found.includes(l.id)) continue
+      if (Math.hypot(l.x - this.pc.pos.x, l.z - this.pc.pos.z) < (l.type === "ghostfence" ? 45 : 32)) {
+        this.landmarks.found.push(l.id)
+        this.msg(`Discovered: ${l.name}`, "#f0d890")
         this.audio.sting("discover")
       }
     }
@@ -588,6 +609,14 @@ export class Game {
   projectileImpact(p, target) {
     if (p.arrow) {
       const a = p.arrow
+      if (target === "player") {
+        this.damagePlayer(a.damage, { physical: true })
+        if (a.trap && Math.random() < 0.4) {
+          this.char.poison = Math.max(this.char.poison, 6)
+          this.msg("The dart was poisoned!", "#9ae070")
+        }
+        return
+      }
       if (target && target !== "player") {
         const dealt = strikeEnemy(this, target, { weapon: a.weapon, dmg: a.damage, charge: a.charge ?? 1, ranged: true, enchant: a.enchant, silver: a.silver, heavy: a.kind === "bolt" && (a.charge ?? 1) > 0.9, noCoat: a.kind !== "thrown" })
         this.exercise("marksman", 1)
@@ -757,6 +786,11 @@ export class Game {
         this.msg("All three tools of Kagrenac are yours. Go to Red Mountain.", "#ffe080")
       }
     }
+    if (item.questId === "isle") {
+      this.isle.stage = 2
+      this.msg("You have the Horn of the Ancestors. Return it to the village elder.", "#f0d890")
+      this.addJournal("I took the Horn of the Ancestors from the draugr lord's body.")
+    }
     if (item.kind === "quest") {
       const q = this.quests.find(q => q.id === item.questId)
       if (q && q.status === "active") {
@@ -764,6 +798,55 @@ export class Game {
         this.msg(`Return the ${item.name} to ${q.giverName} in ${q.giverTown}.`, "#f0d890")
       }
     }
+  }
+
+  // ---------- landmarks ----------
+
+  landmarkState(id) {
+    return (this.landmarks.state[id] ||= {})
+  }
+
+  openLandmarkChest(l) {
+    const st = this.landmarkState(l.id)
+    if (!st.opened) {
+      st.opened = true
+      const rng = new RNG(`landmark:${l.seed}`)
+      st.items = randomLoot(rng, l.tier + 1, l.type === "wreck" ? "coast" : "any", 3)
+      if (l.type === "wreck") st.items.push(makeMisc("pearl", rng.int(1, 3)))
+      st.gold = rng.int(20, 60) * l.tier
+      this.audio.play("door")
+    }
+    this.ui.openContainer(l.name, { get loot() { return st.items }, set loot(v) { st.items = v }, get gold() { return st.gold }, set gold(v) { st.gold = v } })
+  }
+
+  // Prise open a clam on the sea floor: sometimes a pearl.
+  openClam(c) {
+    const st = this.landmarkState(`c${c.id}`)
+    if (st.opened) return
+    st.opened = true
+    this.area.seabed?.userData.open(c.id)
+    const r = new RNG(`clam:${c.seed}`).next()
+    if (r < 0.45) {
+      const n = r < 0.08 ? 2 : 1
+      addItem(this.char, makeMisc("pearl", n))
+      this.audio.play("pickup")
+      this.msg(n > 1 ? "Two pearls!" : "You find a pearl.", "#e0e8f0")
+    } else this.msg("The clam is empty.", "#a8a090")
+  }
+
+  // Propylon chambers link to every other chamber you have found.
+  usePropylon(l) {
+    const found = (this.world.landmarks || []).filter(o => o.type === "propylon" && o.id !== l.id && this.landmarks.found.includes(o.id))
+    if (!found.length) return this.msg("The index stone is cold. You must find another Propylon chamber before this one will carry you anywhere.", "#a0c0ff")
+    this.ui.openChoice(l.name, "The index stone hums. Where will you go?", found.map(o => ({
+      label: o.name,
+      act: () => {
+        this.pc.pos.set(o.x + 2.5, this.world.heightAt(o.x + 2.5, o.z), o.z)
+        this.pc.vel.set(0, 0, 0)
+        this.audio.play("spell", { element: "restore" })
+        this.msg(`The Propylon carries you to ${o.name}.`, "#a0c0ff")
+      },
+    })))
   }
 
   // ---------- dungeons ----------
@@ -798,6 +881,44 @@ export class Game {
     this.autosave()
   }
 
+  // ---------- building interiors ----------
+
+  enterInterior(townId, idx, quiet = false) {
+    const town = this.world.towns[townId]
+    const b = town.buildings[idx]
+    if (this.area.kind === "overworld") {
+      // come back out on the doorstep, facing away from the building
+      const dx = b.door.x - b.x
+      const dz = b.door.z - b.z
+      const l = Math.hypot(dx, dz) || 1
+      const ox = b.door.x + (dx / l) * 1.2
+      const oz = b.door.z + (dz / l) * 1.2
+      this.returnPos = { x: ox, y: this.world.heightAt(ox, oz), z: oz, yaw: Math.atan2(-dx, -dz) }
+    }
+    if (this.area.kind !== "overworld") this.area.dispose()
+    const area = new InteriorArea(this, town, b)
+    this.setArea(area)
+    this.pc.pos.copy(area.entryPos)
+    this.pc.vel.set(0, 0, 0)
+    this.pc.yaw = Math.PI // facing into the room (+z)
+    this.pc.pitch = 0
+    if (quiet) return
+    this.audio.play("door")
+    this.msg(b.label ? `${b.label}, ${town.name}` : `A home in ${town.name}`, "#c9b88f")
+    this.autosave()
+  }
+
+  exitInterior() {
+    this.area.dispose()
+    this.setArea(this.overworld)
+    const r = this.returnPos
+    this.pc.pos.set(r.x, r.y, r.z)
+    this.pc.yaw = r.yaw
+    this.pc.vel.set(0, 0, 0)
+    this.audio.play("door")
+    this.autosave()
+  }
+
   exitDungeon() {
     if (this.area.kind === "dungeon") this.area.dispose()
     this.setArea(this.overworld)
@@ -810,7 +931,7 @@ export class Game {
   }
 
   teleportToTown(town) {
-    if (this.area.kind === "dungeon") {
+    if (this.area.kind !== "overworld") {
       this.area.dispose()
       this.setArea(this.overworld)
     }

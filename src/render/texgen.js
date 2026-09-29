@@ -34,7 +34,7 @@ function buffers(painter, size, seedName) {
   return { c: toColorData(b), n: toNormalData(b, b.n) }
 }
 
-const WORLD_TEXTURES = ["grass", "ash", "rock", "sand", "mud", "volcanic", "dirt", "cobble", "plaster", "wood", "planks", "shingles", "stoneBlocks", "sandstone", "tombBrick", "daedricStone", "floorTiles", "chitinShell", "mushroomCap", "mushroomStalk", "hide", "dwemerMetal", "flesh", "caveRock", "dwemerFloor", "bark", "parasolCap", "gills", "waterNormal", "plate", "fabricTrim", "fabric", "leather", "bone", "chitin"]
+const WORLD_TEXTURES = ["grass", "ash", "rock", "sand", "snow", "road", "mud", "volcanic", "dirt", "cobble", "plaster", "wood", "planks", "shingles", "stoneBlocks", "sandstone", "tombBrick", "daedricStone", "floorTiles", "chitinShell", "mushroomCap", "mushroomStalk", "hide", "dwemerMetal", "flesh", "caveRock", "dwemerFloor", "bark", "parasolCap", "gills", "waterNormal", "plate", "fabricTrim", "fabric", "leather", "bone", "chitin"]
 
 // Generate every texture in parallel web workers before the world is built.
 export function preloadTextures(onProgress = () => {}) {

@@ -281,6 +281,43 @@ P.sand = (S, seed) => {
   return b
 }
 
+// wind-packed snow with drifts and a faint sparkle
+P.snow = (S, seed) => {
+  const b = newBuf(S)
+  const n1 = fbmTile(S, 3, 5, seed)
+  const n2 = fbmTile(S, 128, 1, seed + 1)
+  const warp = fbmTile(S, 2, 2, seed + 2)
+  for (let y = 0; y < S; y++)
+    for (let x = 0; x < S; x++) {
+      const p = y * S + x
+      const drift = 0.5 + 0.5 * Math.sin((y / S) * Math.PI * 2 * 5 + warp[p] * 9)
+      const t = n1[p] * 0.6 + drift * 0.25
+      let [r, g, bl] = ramp([hex(0xaab4c4), hex(0xd4dce6), hex(0xf2f6fa)], t)
+      if (n2[p] > 0.82) (r = 1), (g = 1), (bl = 1)
+      put(b, p, r, g, bl, drift * 0.35 + n1[p] * 0.3)
+    }
+  b.n = 1
+  return b
+}
+
+// a worn cart road: packed dirt, wheel ruts and scattered stones
+P.road = (S, seed) => {
+  const b = newBuf(S)
+  const n1 = fbmTile(S, 4, 5, seed)
+  const w = worleyTile(S, 22, seed + 1)
+  for (let y = 0; y < S; y++)
+    for (let x = 0; x < S; x++) {
+      const p = y * S + x
+      const rut = Math.exp(-((((x / S) * 4) % 1 - 0.5) ** 2) * 40) * 0.3
+      const stone = clamp01((0.18 - (w.f1[p] || 0)) * 8)
+      const t = n1[p] * 0.7 - rut + stone * 0.4
+      const [r, g, bl] = ramp([hex(0x4a3e2e), hex(0x6a5a44), hex(0x857258), hex(0x9a9088)], t)
+      put(b, p, r, g, bl, n1[p] * 0.5 + stone * 0.4 - rut)
+    }
+  b.n = 2
+  return b
+}
+
 P.mud = (S, seed) => {
   const b = newBuf(S)
   const n1 = fbmTile(S, 3, 6, seed)

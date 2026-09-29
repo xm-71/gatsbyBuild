@@ -193,6 +193,7 @@ export class Enemy {
     const dz = pc.pos.z - this.pos.z
     const dist = Math.hypot(dx, dz)
     const dy = pc.pos.y - this.pos.y
+    if (this.blighted && Math.random() < dt * 1.2) g.particles?.burst(this.center, "flesh", 3)
     this.voiceT -= dt
     if (this.voiceT <= 0) {
       this.voiceT = (this.aware ? 5 : 9) + Math.random() * 12
@@ -214,7 +215,7 @@ export class Enemy {
     const reach = this.def.reach * (this.boss ? 1.15 : 1)
 
     // Creatures won't follow you into a town: the guards see to that.
-    const town = this.area.kind === "overworld" ? this.area.townAt(this.pos.x, this.pos.z, 6) : null
+    const town = this.area.kind === "overworld" && !this.raider ? this.area.townAt(this.pos.x, this.pos.z, 6) : null
     if (town) {
       this.aware = false
       const ax = this.pos.x - town.x
@@ -385,7 +386,8 @@ export class Enemy {
     this.attackAnim = 1
     const dmg = (this.dmg[0] + Math.random() * (this.dmg[1] - this.dmg[0])) * (this.weakenT > 0 ? 1 - this.weakenAmt : 1)
     g.damagePlayer(dmg, { physical: true, source: this })
-    if (this.def.element && !c.dead) g.damagePlayer(dmg * 0.4, { element: this.def.element, source: this, quiet: true })
+    const el = this.def.element || this.blightElement
+    if (el && !c.dead) g.damagePlayer(dmg * 0.4, { element: el, source: this, quiet: true })
   }
 
   dispose() {
@@ -449,6 +451,20 @@ export class Npc {
     }
     if (talkingTo === this || toP < 3.5) {
       // already facing
+    } else if (this.path && this.pathI < this.path.length) {
+      // travellers walk the road from point to point
+      const [tx, tz] = this.path[this.pathI]
+      const dx = tx - this.pos.x
+      const dz = tz - this.pos.z
+      const d = Math.hypot(dx, dz)
+      if (d < 1.5) this.pathI++
+      else {
+        this.pos.x += (dx / d) * 1.4 * dt
+        this.pos.z += (dz / d) * 1.4 * dt
+        this.yaw = lerpAngle(this.yaw, Math.atan2(dx, dz), Math.min(1, dt * 4))
+        moving = 0.55
+      }
+      this.pos.y = this.area.groundHeight(this.pos.x, this.pos.z)
     } else if (this.spec.wander) {
       if (!this.target) {
         this.waitT -= dt
@@ -477,12 +493,20 @@ export class Npc {
     this.mesh.position.copy(this.pos)
     this.mesh.rotation.y = this.yaw
     this.look = this.look == null || look == null ? look : this.look + (look - this.look) * Math.min(1, dt * 4)
-    if (this.lodSwitch.update(toP)) this.anim(this.t, moving, 0, { look: this.look, seed: this.seed, talk: talkingTo === this ? !!this.talking : undefined })
+    // a smith at the anvil keeps hammering until you speak to them
+    let work = 0
+    if (this.spec.work === "hammer" && talkingTo !== this && !moving) {
+      work = Math.max(0, Math.sin(this.t * 3.2)) ** 3
+      const beat = Math.floor((this.t * 3.2) / (Math.PI * 2))
+      if (beat !== this.lastBeat && toP < 25) this.game.audio.play("anvil", { pos: this.pos.clone().setY(this.pos.y + 0.9) })
+      this.lastBeat = beat
+    }
+    if (this.lodSwitch.update(toP)) this.anim(this.t, moving, work, { look: this.look, seed: this.seed, talk: talkingTo === this ? !!this.talking : undefined })
   }
 }
 
 export function roleTitle(role) {
-  return { trader: "Trader", smith: "Smith", priest: "Healer", caravaner: "Caravaner", guard: "Guard", commoner: "Commoner", blade: "Blades Contact", guildmaster: "Guild" }[role] || role
+  return { trader: "Trader", smith: "Smith", priest: "Healer", caravaner: "Caravaner", guard: "Guard", commoner: "Commoner", blade: "Blades Contact", guildmaster: "Guild", shipmaster: "Shipmaster", guide: "Guild Guide", elder: "Elder", pilgrim: "Pilgrim" }[role] || role
 }
 
 export class Projectile {

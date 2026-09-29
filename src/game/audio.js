@@ -82,8 +82,8 @@ export class Audio {
 
   enterArea(area) {
     if (!this.e.ctx) return
-    this.e.setSpace(area.kind === "dungeon" ? "dungeon" : "overworld")
-    this.ambience.setEmitters(area.kind === "dungeon" ? area.lightPositions?.() || [] : [])
+    this.e.setSpace(area.kind === "overworld" ? "overworld" : area.kind === "interior" ? "town" : "dungeon")
+    this.ambience.setEmitters(area.kind !== "overworld" ? area.lightPositions?.() || [] : [])
   }
 
   // Called every frame with the game: listener, music mood and ambience mix.
@@ -104,7 +104,11 @@ export class Audio {
     const w = g.world
     const area = g.area
     const p = title ? g.camera.position : g.pc.pos
-    const env = { underwater: !!g.pc?.underwater && !title, kind: area.kind, title, weather: title ? "clear" : g.weather, night: !title && g.isNight?.(), region: w.regionAt(p.x, p.z), inTown: false, coast: 0, lava: false, theme: area.dungeon?.type || "cave" }
+    const env = { underwater: !!g.pc?.underwater && !title, kind: area.kind, title, interior: area.kind === "interior", weather: title ? "clear" : g.weather, night: !title && g.isNight?.(), region: w.regionAt(p.x, p.z), inTown: false, coast: 0, lava: false, theme: area.dungeon?.type || "cave" }
+    if (area.kind === "interior") {
+      env.inTown = true
+      env.region = area.town.region
+    }
     if (area.kind === "overworld") {
       env.inTown = !!area.townAt?.(p.x, p.z, 10)
       let water = 0

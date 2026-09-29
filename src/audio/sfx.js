@@ -245,6 +245,15 @@ export function misc(e, out, name, opts = {}) {
       const heavy = Math.min(1, (opts.weight || 10) / 40)
       return e.noise(out, { dur: 0.22 + heavy * 0.1, gain: 0.22, freq: 1100 - heavy * 600, sweep: -500, q: 0.9 })
     }
+    case "thunder": {
+      const far = Math.min(1, (opts.dist || 200) / 400)
+      e.noise(out, { dur: 3.5, gain: 0.5 * (1 - far * 0.5), type: "lowpass", freq: 220 - far * 100, a: 0.05 })
+      if (far < 0.5) e.noise(out, { dur: 0.25, gain: 0.3, type: "highpass", freq: 1500 })
+      return e.noise(out, { t0: e.now + 0.4, dur: 2.5, gain: 0.3, type: "lowpass", freq: 120, a: 0.3 })
+    }
+    case "anvil":
+      e.fm(out, { freq: 880 + Math.random() * 60, ratio: 2.41, index: 1400, dur: 0.5, gain: 0.08 })
+      return e.noise(out, { dur: 0.05, gain: 0.08, type: "highpass", freq: 3000 })
     case "windup":
       return e.noise(out, { dur: 0.35, gain: 0.05, freq: 500, sweep: 900, q: 1.5, a: 0.2 })
     case "whiff":

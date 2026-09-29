@@ -100,12 +100,12 @@ export class Ambience {
     const out = env.kind === "overworld"
     const dung = env.kind === "dungeon"
     const w = env.weather
-    const storm = w === "ash" || w === "blight"
+    const storm = w === "ash" || w === "blight" || w === "blizzard"
     const ashy = ["ashlands", "redMountain", "molagAmur"].includes(env.region)
     const target = {
       wind: out ? (storm ? 0.5 : ashy ? 0.2 : 0.09) * (env.title ? 0.5 : 1) : dung && env.theme === "cave" ? 0.02 : 0,
-      grit: out && storm ? 0.12 : 0,
-      rain: out && w === "rain" ? 0.2 : 0,
+      grit: out && storm && w !== "blizzard" ? 0.12 : out && w === "snow" ? 0.03 : 0,
+      rain: out && (w === "rain" || w === "storm") ? (w === "storm" ? 0.3 : 0.2) : 0,
       surf: out ? env.coast * 0.22 : 0,
       cave: dung ? (env.theme === "dwemer" ? 0.05 : 0.14) : 0,
       murmur: out && env.inTown && !env.night ? 0.035 : 0,
@@ -148,7 +148,7 @@ export class Ambience {
     if (out && !env.title) {
       if (grassy && !env.night && w !== "rain" && !storm) every("bird", 2.5, 9, () => this.bird())
       if (grassy && env.night && w !== "rain") every("cricket", 0.4, 1.6, () => this.cricket())
-      if (w === "rain") every("drop", 0.05, 0.2, () => e.noise(bus, { dur: 0.03, gain: 0.03 + Math.random() * 0.04, freq: 3000 + Math.random() * 4000, q: 4 }))
+      if (w === "rain" || w === "storm") every("drop", 0.05, 0.2, () => e.noise(bus, { dur: 0.03, gain: 0.03 + Math.random() * 0.04, freq: 3000 + Math.random() * 4000, q: 4 }))
       if (env.lava) every("lava", 0.8, 2.5, () => this.bubble())
       if (env.inTown && !env.night) every("hammer", 5, 14, () => this.distantHammer())
       if (env.region === "bitterCoast" && !env.night) every("frog", 3, 8, () => e.osc(bus, { type: "square", freq: 140, slide: -40, dur: 0.12, gain: 0.02 }))
@@ -157,12 +157,12 @@ export class Ambience {
       for (let i = 0; i < 3; i++) e.osc(bus, { freq: 500 + Math.random() * 700, slide: 400, dur: 0.06, gain: 0.03, t0: e.now + i * 0.08 })
     })
     if (dung) {
-      if (env.theme === "cave" || env.theme === "tomb" || env.theme === "citadel") every("drip", 1.2, 4.5, () => this.drip())
+      if (env.theme === "cave" || env.theme === "tomb" || env.theme === "barrow" || env.theme === "citadel") every("drip", 1.2, 4.5, () => this.drip())
       if (env.theme === "dwemer") {
         every("steam", 4, 11, () => e.noise(bus, { dur: 1.4, gain: 0.05, type: "highpass", freq: 2500, a: 0.2 }))
         every("clank", 3, 9, () => e.fm(bus, { freq: 180 + Math.random() * 120, ratio: 2.76, index: 500, dur: 0.6, gain: 0.03 }))
       }
-      if (env.theme === "tomb") every("moan", 9, 20, () => this.moan())
+      if (env.theme === "tomb" || env.theme === "barrow") every("moan", 9, 20, () => this.moan())
     }
   }
 

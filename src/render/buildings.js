@@ -3,6 +3,7 @@ import { makeLabel, } from "./textures.js"
 import { texturedMaterial } from "./texgen.js"
 import { Builder, lathe, rockGeometry, taperTube } from "./geom.js"
 import { seg } from "../core/quality.js"
+import { buildVelothiTower, buildDwemerRuins } from "./landmarks.js"
 
 // Shared glowing material for windows and lanterns; intensity follows the time of day.
 export const GLOW = new THREE.MeshLambertMaterial({ color: 0x3a2a14, emissive: 0xffb050, emissiveIntensity: 0.6 })
@@ -312,7 +313,46 @@ function temple(P, b, style) {
   for (const sx of [-1, 1]) windowFrame(P, sx * w * 0.32, baseH * 0.6, -d / 2, Math.PI, 0.6, 1.8, stone)
 }
 
-const STYLE_FN = { hlaalu: hlaaluHouse, redoran: redoranHouse, telvanni: telvanniHouse, imperial: imperialHouse, ashlander: ashlanderYurt }
+// Nord longhouse: log walls on a stone footing, a steep snow-laden roof with
+// crossed gable beams, and a smoke hole.
+function nordHouse(P, b) {
+  const { w, d } = b
+  const big = b.type === "manor" || b.type === "hall"
+  const L = big ? d * 1.5 : d
+  const wallH = big ? 3.4 : 2.8
+  P.box(w + 0.5, 0.8, L + 0.5, MAT.darkStone(), 0, 0, 0)
+  // stacked logs
+  const logs = Math.round(wallH / 0.36)
+  for (let i = 0; i < logs; i++) {
+    const y = 0.5 + i * 0.36
+    for (const sx of [-1, 1]) P.cyl(0.19, 0.19, L + 0.6, MAT.timber(), (sx * w) / 2, y, 0, { rot: [Math.PI / 2, 0, 0], segs: 6 })
+    for (const sz of [-1, 1]) P.cyl(0.19, 0.19, w + 0.6, MAT.timber(), 0, y + 0.18, (sz * L) / 2, { rot: [0, 0, Math.PI / 2], segs: 6 })
+  }
+  // steep roof with a snow cap
+  const rise = w * 0.75
+  const halfW = w / 2 + 0.8
+  const slope = Math.atan2(rise, halfW)
+  const len = Math.hypot(halfW, rise)
+  const top = 0.5 + wallH
+  for (const sx of [-1, 1]) {
+    P.box(len, 0.3, L + 1.2, MAT.shingles(), (sx * halfW) / 2, top + rise / 2, 0, { rot: [0, 0, -sx * slope] })
+    P.box(len * 0.92, 0.12, L + 1.25, TM("snow", 0xffffff), (sx * halfW) / 2 * 0.98, top + rise / 2 + 0.2, 0, { rot: [0, 0, -sx * slope] })
+  }
+  const gable = new THREE.CylinderGeometry(1, 1, 0.3, 3)
+  for (const sz of [-1, 1]) {
+    P.add(gable, MAT.planks(), { pos: [0, top + rise / 3, (sz * L) / 2], rot: [-Math.PI / 2, 0, 0], scale: [w / 1.73, 1, rise * 0.667] })
+    // crossed gable beams
+    for (const sx of [-1, 1]) P.box(0.18, 1.8, 0.18, MAT.timber(), sx * 0.35, top + rise + 0.5, (sz * L) / 2 + 0.3, { rot: [0, 0, sx * 0.5] })
+  }
+  P.box(0.6, 0.6, 0.6, MAT.darkStone(), 0, top + rise - 0.1, L * 0.2) // smoke hole
+  door(P, -L / 2, 1.3, 2.2, MAT.planks(), MAT.timber())
+  lantern(P, 1.2, 2.4, -L / 2 - 0.4)
+  if (!big) crate(P, w / 2 + 0.7, L * 0.2, 0.8, 0.3)
+  // antlers over the door of the big halls
+  if (big) for (const sx of [-1, 1]) P.add(taperTube([V3(sx * 0.1, 0, 0), V3(sx * 0.5, 0.4, 0), V3(sx * 0.7, 0.9, 0.1)], 0.05, 0.015, 4, 5), TM("bone", 0xe8e0c8), { pos: [0, 3.2, -L / 2 - 0.2] })
+}
+
+const STYLE_FN = { hlaalu: hlaaluHouse, redoran: redoranHouse, telvanni: telvanniHouse, imperial: imperialHouse, ashlander: ashlanderYurt, nord: nordHouse }
 
 // ---------------- towns ----------------
 
@@ -323,7 +363,7 @@ export function buildTown(town, colliders) {
   // cobbled plaza that follows the flattened ground
   const plaza = new THREE.CircleGeometry(plazaR, seg(32))
   plaza.rotateX(-Math.PI / 2)
-  builder.add(plaza, town.style === "ashlander" ? TM("dirt", 0xffffff) : MAT.cobble(), { pos: [town.x, town.y + 0.05, town.z], uv: 3 })
+  builder.add(plaza, town.style === "ashlander" ? TM("dirt", 0xffffff) : town.style === "nord" ? TM("road", 0xffffff) : MAT.cobble(), { pos: [town.x, town.y + 0.05, town.z], uv: 3 })
 
   for (const b of town.buildings) {
     const P = new Placer(builder, b.x, town.y, b.z, b.rot)
@@ -340,12 +380,13 @@ export function buildTown(town, colliders) {
     if (town.style === "ashlander" || (town.style === "telvanni" && b.type !== "manor" && b.type !== "temple")) colliders.addCircle(b.x, b.z, town.style === "telvanni" ? b.w * 0.36 : b.w / 2 + 0.2)
     else if (town.style === "redoran") colliders.addBox(b.x, b.z, b.w + 1, b.d + 1, b.rot)
     else if (town.style === "telvanni") colliders.addCircle(b.x, b.z, b.w * 0.4)
+    else if (town.style === "nord") colliders.addBox(b.x, b.z, b.w + 0.6, (b.type === "manor" || b.type === "hall" ? b.d * 1.5 : b.d) + 0.6, b.rot)
     else colliders.addBox(b.x, b.z, b.w + 0.2, b.d + 0.2, b.rot)
   }
 
   // plaza dressing: a well or fire pit, market stall, lamp posts
   const C = new Placer(builder, town.x, town.y, town.z, 0)
-  if (town.style === "ashlander") {
+  if (town.style === "ashlander" || town.style === "nord") {
     C.add(new THREE.TorusGeometry(0.9, 0.3, 5, seg(10)), MAT.rock(), { pos: [0, 0.15, 0], rot: [Math.PI / 2, 0, 0] })
     C.add(new THREE.ConeGeometry(0.5, 0.9, 6), GLOW, { pos: [0, 0.45, 0] })
   } else {
@@ -382,11 +423,14 @@ export function buildTown(town, colliders) {
   name.position.set(town.x, town.y + 16, town.z)
   group.add(name)
 
-  const strider = buildSiltStrider()
-  strider.position.set(town.port.x, town.y, town.port.z)
-  strider.rotation.y = -town.port.angle
-  group.add(strider)
-  colliders.addCircle(town.port.x, town.port.z, 1.2)
+  let strider = null
+  if (town.style !== "nord") {
+    strider = buildSiltStrider()
+    strider.position.set(town.port.x, town.y, town.port.z)
+    strider.rotation.y = -town.port.angle
+    group.add(strider)
+    colliders.addCircle(town.port.x, town.port.z, 1.2)
+  }
 
   const light = new THREE.PointLight(0xffb060, 0, 45, 1.4)
   light.position.set(town.x, town.y + 6, town.z)
@@ -460,6 +504,8 @@ export function buildEntrance(d, colliders) {
     P.box(0.14, 2.6, 0.14, MAT.timber(), 1.2, 1.3, -1)
     P.box(2.8, 0.18, 0.18, MAT.timber(), 0, 2.6, -1)
     lantern(P, 1.5, 2.2, -1.2)
+  } else if (d.tower) {
+    buildVelothiTower(P)
   } else if (d.type === "tomb") {
     P.add(rockGeometry(d.seed % 97, 2, 4, 0.2), TM("grass", 0xa0a080), { pos: [0, -0.4, 2], scale: [1.1, 0.55, 1.1], uv: 3 })
     P.box(4.2, 3.8, 1.4, MAT.tomb(), 0, 1.7, -1.6)
@@ -469,6 +515,18 @@ export function buildEntrance(d, colliders) {
     P.box(1.8, 2.6, 0.2, MAT.planks(), 0, 1.4, -2.35)
     for (let i = 0; i < 3; i++) P.box(3 - i * 0.3, 0.2, 0.6, MAT.sandstone(), 0, 0.1 + i * 0.2 - 0.4, -3.2 + i * 0.4)
     P.add(new THREE.SphereGeometry(0.4, 8, 6), TM("bone", 0xe0d8c0), { pos: [0, 3.2, -2.35], scale: [1, 1.1, 0.5] })
+  } else if (d.type === "barrow") {
+    // a snowy burial mound ringed by standing stones, with a carved stone door
+    P.add(rockGeometry(d.seed % 89, 2, 4, 0.2), TM("snow", 0xffffff), { pos: [0, -0.6, 2.5], scale: [1.4, 0.7, 1.4], uv: 3 })
+    P.box(4, 3.4, 1.2, MAT.darkStone(), 0, 1.5, -1.6)
+    P.box(4.8, 0.6, 1.6, MAT.darkStone(), 0, 3.4, -1.6)
+    for (const sx of [-1, 1]) P.box(0.7, 3.8, 0.7, MAT.darkStone(), sx * 2.1, 1.9, -2.2)
+    P.box(1.9, 2.6, 0.2, MAT.stone(), 0, 1.3, -2.25)
+    P.add(new THREE.TorusGeometry(0.45, 0.07, 4, seg(12)), MAT.iron(), { pos: [0, 1.6, -2.4] })
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + 0.3
+      P.box(0.6, 2.4 + (i % 3) * 0.5, 0.4, MAT.darkStone(), Math.cos(a) * 6.5, 1, Math.sin(a) * 6.5 + 2, { rot: [0, a, (i % 2 ? 1 : -1) * 0.06] })
+    }
   } else if (d.type === "dwemer") {
     P.add(lathe([[3.6, 0], [3.4, 1.6], [2.4, 3.2], [0.6, 3.9], [0.01, 4]], seg(20)), MAT.dwemer(), { pos: [0, 0, 1.5], uv: 2 })
     P.box(3.6, 4, 1.6, MAT.dwemer(), 0, 2, -1.4)
@@ -481,6 +539,7 @@ export function buildEntrance(d, colliders) {
     }
     P.add(new THREE.TorusGeometry(1.1, 0.25, 6, 12), MAT.dwemer(), { pos: [0, 3.2, -2.3] })
     lantern(P, 1.6, 3, -2.4)
+    for (const [x, z, r] of buildDwemerRuins(P, d.seed)) colliders.addCircle(d.x + x * Math.cos(rot) + z * Math.sin(rot), d.z - x * Math.sin(rot) + z * Math.cos(rot), r)
   } else {
     const big = d.type === "citadel" ? 1.8 : 1
     const stone = d.type === "citadel" ? MAT.flesh() : MAT.daedric()
@@ -507,7 +566,7 @@ export function buildEntrance(d, colliders) {
     group.add(holder)
   }
   group.add(builder.build())
-  colliders.addCircle(d.x + Math.sin(rot) * 1.2, d.z + Math.cos(rot) * 1.2, d.type === "citadel" ? 3.5 : 2.2)
+  colliders.addCircle(d.x + Math.sin(rot) * (d.tower ? 0.6 : 1.2), d.z + Math.cos(rot) * (d.tower ? 0.6 : 1.2), d.type === "citadel" ? 3.5 : d.tower ? 3.3 : 2.2)
   const doorPos = new THREE.Vector3(d.x - Math.sin(rot) * 3, d.y + 1.5, d.z - Math.cos(rot) * 3)
   return { group, doorPos }
 }

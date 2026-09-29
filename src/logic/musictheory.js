@@ -30,6 +30,8 @@ export const PRESETS = {
   town: { root: N.G, mode: "dorian", bpm: 84, density: 0.6, lead: "flute", colors: ["pluck", "frame"] },
   cave: { root: N.C, mode: "aeolian", bpm: 52, density: 0.2, lead: "strings", colors: ["drone"] },
   tomb: { root: N.D, mode: "phrygian", bpm: 50, density: 0.2, lead: "choir", colors: ["drone"] },
+  barrow: { root: N.E, mode: "aeolian", bpm: 50, density: 0.22, lead: "horn", colors: ["drone", "frame"] },
+  frostholm: { root: N.E, mode: "dorian", bpm: 60, density: 0.4, lead: "horn", colors: ["drone", "strings"] },
   dwemer: { root: N.Bb, mode: "dorian", bpm: 56, density: 0.3, lead: "bells", colors: ["drone"] },
   daedric: { root: N.Db, mode: "harmonicMinor", bpm: 54, density: 0.25, lead: "choir", colors: ["drone", "frame"] },
   citadel: { root: N.D, mode: "phrygian", bpm: 60, density: 0.25, lead: "choir", colors: ["drone", "heart"] },

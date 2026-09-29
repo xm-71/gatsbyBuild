@@ -10,6 +10,7 @@ import { Q, seg } from "../core/quality.js"
 
 export const THEME_LOOK = {
   cave: { floor: "caveRock", wall: "caveRock", ceil: "caveRock", floorTint: 0x8a7a68, wallTint: 0xb0a090, ceilTint: 0x6a5e50, height: 5, light: 0xffa050, fog: 0x0c0906, ambient: 0x3a3026, wall3: [0x6a, 0x5e, 0x50], organic: true },
+  barrow: { floor: "floorTiles", wall: "tombBrick", ceil: "caveRock", floorTint: 0x9aa4b0, wallTint: 0x9aa8b8, ceilTint: 0x6a7a8a, height: 4.2, light: 0x9ac8ff, fog: 0x06090e, ambient: 0x283444, wall3: [0x6a, 0x74, 0x80], trim: "sandstone", beams: "planks" },
   tomb: { floor: "floorTiles", wall: "tombBrick", ceil: "tombBrick", floorTint: 0xb0a898, wallTint: 0xd0c4b0, ceilTint: 0x8a8070, height: 3.8, light: 0xc0d0ff, fog: 0x08080c, ambient: 0x2e3038, wall3: [0x8a, 0x7e, 0x68], trim: "sandstone", beams: "planks" },
   dwemer: { floor: "dwemerFloor", wall: "dwemerMetal", ceil: "dwemerMetal", floorTint: 0xffffff, wallTint: 0xffffff, ceilTint: 0x9a8a70, height: 6, light: 0xffd080, fog: 0x0e0a06, ambient: 0x3a3020, wall3: [0xa0, 0x80, 0x40], trim: "dwemerMetal", pipes: true },
   daedric: { floor: "daedricStone", wall: "daedricStone", ceil: "daedricStone", floorTint: 0xb0a0a0, wallTint: 0xffffff, ceilTint: 0x6a5a5a, height: 7, light: 0xff5a30, fog: 0x0c0404, ambient: 0x3a2020, wall3: [0x5a, 0x3a, 0x30], trim: "daedricStone", ribs: true },
@@ -71,6 +72,12 @@ export function buildDungeonMesh(lvl) {
       }
   }
 
+  // floors follow the level's corner heights (ramps between raised and
+  // sunken rooms); walls reach down past the lowest floor
+  const CH = lvl.corners
+  const cw = lvl.w + 1
+  const ch = (x, y) => (CH ? CH[y * cw + x] : 0)
+  const WB = -1.8 // wall bottom
   for (let y = 0; y < lvl.h; y++) {
     for (let x = 0; x < lvl.w; x++) {
       if (!isFloor(x, y)) continue
@@ -79,14 +86,14 @@ export function buildDungeonMesh(lvl) {
       const z0 = y * CELL
       const z1 = z0 + CELL
       const fuv = (px, py, pz) => [px / 4, pz / 4]
-      quad("floor", [x0, 0, z0], [x0, 0, z1], [x1, 0, z1], [x1, 0, z0], fuv)
+      quad("floor", [x0, ch(x, y), z0], [x0, ch(x, y + 1), z1], [x1, ch(x + 1, y + 1), z1], [x1, ch(x + 1, y), z0], fuv)
       quad("ceil", [x0, H, z0], [x1, H, z0], [x1, H, z1], [x0, H, z1], fuv)
       const wx = (px, py) => [px / 4, py / 4]
       const wz = (px, py, pz) => [pz / 4, py / 4]
-      if (!isFloor(x, y - 1)) quad("wall", [x0, 0, z0], [x1, 0, z0], [x1, H, z0], [x0, H, z0], wx)
-      if (!isFloor(x, y + 1)) quad("wall", [x1, 0, z1], [x0, 0, z1], [x0, H, z1], [x1, H, z1], wx)
-      if (!isFloor(x - 1, y)) quad("wall", [x0, 0, z1], [x0, 0, z0], [x0, H, z0], [x0, H, z1], wz)
-      if (!isFloor(x + 1, y)) quad("wall", [x1, 0, z0], [x1, 0, z1], [x1, H, z1], [x1, H, z0], wz)
+      if (!isFloor(x, y - 1)) quad("wall", [x0, WB, z0], [x1, WB, z0], [x1, H, z0], [x0, H, z0], wx)
+      if (!isFloor(x, y + 1)) quad("wall", [x1, WB, z1], [x0, WB, z1], [x0, H, z1], [x1, H, z1], wx)
+      if (!isFloor(x - 1, y)) quad("wall", [x0, WB, z1], [x0, WB, z0], [x0, H, z0], [x0, H, z1], wz)
+      if (!isFloor(x + 1, y)) quad("wall", [x1, WB, z0], [x1, WB, z1], [x1, H, z1], [x1, H, z0], wz)
     }
   }
 
@@ -132,13 +139,13 @@ export function buildDungeonMesh(lvl) {
           const along = dx === 0
           const px = cx + dx * (CELL / 2 - 0.12)
           const pz = cz + dy * (CELL / 2 - 0.12)
-          B.add(new THREE.BoxGeometry(along ? CELL : 0.26, 0.4, along ? 0.26 : CELL), trim, { pos: [px, 0.2, pz], uv: 1.5 })
+          B.add(new THREE.BoxGeometry(along ? CELL : 0.26, 0.4, along ? 0.26 : CELL), trim, { pos: [px, 0.2 + (lvl.heights ? lvl.heights[y * lvl.w + x] : 0), pz], uv: 1.5 })
           B.add(new THREE.BoxGeometry(along ? CELL : 0.3, 0.3, along ? 0.3 : CELL), trim, { pos: [px, H - 0.15, pz], uv: 1.5 })
         }
         // pillars where two walls meet at an inside corner
         for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
           if (!isFloor(x + dx, y) && !isFloor(x, y + dy)) {
-            B.add(new THREE.CylinderGeometry(0.32, 0.38, H, seg(10)), trim, { pos: [cx + dx * (CELL / 2 - 0.3), H / 2, cz + dy * (CELL / 2 - 0.3)], uv: 1.5 })
+            B.add(new THREE.CylinderGeometry(0.32, 0.38, H + 1.8, seg(10)), trim, { pos: [cx + dx * (CELL / 2 - 0.3), (H - 1.8) / 2, cz + dy * (CELL / 2 - 0.3)], uv: 1.5 })
           }
         }
         // ceiling beams, pipes or ribs every other cell
@@ -194,7 +201,8 @@ export function buildDungeonMesh(lvl) {
   }
 
   const reserved = new Set()
-  for (const p of lvl.props) addProp(B, p, look, center)
+  const cellH = (x, y) => (lvl.heights ? lvl.heights[y * lvl.w + x] : 0)
+  for (const p of lvl.props) addProp(B, { ...p, hy: cellH(p.x, p.y) }, look, center)
   void reserved
   group.add(B.build())
   return { group, height: H, look, lights: lightObjs }
@@ -217,7 +225,8 @@ function addProp(B, p, look, center) {
   const cz = cz0 + p.oz
   const r = p.rot
   const TM = (n, c = 0xffffff, extra) => texturedMaterial(n, { color: c, ...extra })
-  const at = (dx, dy, dz) => [cx + Math.cos(r) * dx + Math.sin(r) * dz, dy, cz - Math.sin(r) * dx + Math.cos(r) * dz]
+  const hy = p.hy || 0
+  const at = (dx, dy, dz) => [cx + Math.cos(r) * dx + Math.sin(r) * dz, dy + hy, cz - Math.sin(r) * dx + Math.cos(r) * dz]
   switch (p.type) {
     case "urn":
       B.add(lathe([[0.01, 0], [0.28, 0.02], [0.42, 0.4], [0.36, 0.8], [0.18, 0.95], [0.22, 1.1], [0.2, 1.15]], seg(14)), TM("plaster", 0xa87a58), { pos: at(0, 0, 0), uv: 1 })
@@ -274,7 +283,7 @@ function addProp(B, p, look, center) {
       B.add(new THREE.BoxGeometry(1, 0.6, 1), m, { pos: at(0, 0.3, 0), rot: [0, r, 0], uv: 1 })
       B.add(lathe([[0.3, 0], [0.42, 0.4], [0.28, 1.2], [0.36, 1.8], [0.2, 2.1], [0.01, 2.15]], seg(10)), m, { pos: at(0, 0.6, 0), uv: 1 })
       B.add(new THREE.SphereGeometry(0.28, seg(10), 8), m, { pos: at(0, 3, 0), uv: 1 })
-      for (const s of [-1, 1]) B.add(taperTube([new THREE.Vector3(s * 0.15, 3.15, 0), new THREE.Vector3(s * 0.4, 3.5, -0.1), new THREE.Vector3(s * 0.35, 3.9, -0.3)], 0.07, 0.01, 5, 6), m, { pos: [cx, 0, cz], uv: 1 })
+      for (const s of [-1, 1]) B.add(taperTube([new THREE.Vector3(s * 0.15, 3.15, 0), new THREE.Vector3(s * 0.4, 3.5, -0.1), new THREE.Vector3(s * 0.35, 3.9, -0.3)], 0.07, 0.01, 5, 6), m, { pos: [cx, hy, cz], uv: 1 })
       break
     }
     case "brazier":

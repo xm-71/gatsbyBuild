@@ -840,6 +840,12 @@ export function buildCreatureMesh(def) {
     case "sphere":
       built = sphereBot(def)
       break
+    case "riekling":
+      built = humanoid({ bigHead: true, skin: c, cloth: 0x5a4a3a, pants: 0x3a2e24, hair: 0xe0e0e8, hairStyle: "crest", elf: true, weapon: "spear", weaponMaterial: "chitin", weaponColor: 0x8a8070, sleeves: false, eye: 0x101820 })
+      break
+    case "draugr":
+      built = humanoid({ skull: true, thin: true, skin: c, cloth: 0x3a3e44, armor: "chain", armorColor: 0x5a5e66, helm: 0x4a4e56, helmTile: "plate", helmCrest: def.level > 8, weapon: def.level > 8 ? "battle axe" : "war axe", weaponMaterial: "iron", weaponColor: 0x6a6e73, shield: def.level > 8 ? null : "iron", glowEyes: 0x70c0ff })
+      break
     case "skeleton":
       built = humanoid({ skull: true, thin: true, skin: c, cloth: c, weapon: "shortsword", weaponMaterial: "iron", weaponColor: 0x7a7a7a, shield: def.level > 4 ? "iron" : null, glowEyes: 0xff6a20 })
       break

@@ -31,6 +31,13 @@ export const CREATURES = {
   corprusStalker: { name: "Corprus Stalker", level: 8, hp: 95, dmg: [8, 16], speed: 3.6, rate: 1.0, reach: 2.3, ar: 14, agility: 25, body: "ash", color: 0x9a6a50, scale: 1.2, sixthHouse: true, element: "poison", habitat: ["citadel", "redMountain"], loot: ["corprus weepings"] },
   ashGhoul: { name: "Ash Ghoul", level: 11, hp: 130, dmg: [10, 20], speed: 3.8, rate: 1.0, reach: 2.4, ar: 20, agility: 40, body: "ash", color: 0x4a3a34, scale: 1.25, sixthHouse: true, caster: "fireball", habitat: ["citadel"], loot: ["ash salts"] },
   ascendedSleeper: { name: "Ascended Sleeper", level: 15, hp: 200, dmg: [14, 28], speed: 3.8, rate: 1.0, reach: 2.6, ar: 26, agility: 40, body: "sleeper", color: 0x6a3a2a, scale: 1.4, sixthHouse: true, caster: "lightningBolt", resist: { fire: 0.5 }, habitat: ["citadel"], loot: ["ash salts"] },
+  // the frozen isle
+  wolf: { name: "Wolf", level: 3, hp: 30, dmg: [3, 8], speed: 6, rate: 1.1, reach: 1.9, ar: 4, agility: 45, body: "hound", color: 0x8a8c90, scale: 0.85, resist: { frost: 0.5 }, habitat: ["frostholm"], loot: ["wolf pelt"] },
+  snowBear: { name: "Snow Bear", level: 7, hp: 110, dmg: [8, 18], speed: 4.6, rate: 0.8, reach: 2.4, ar: 14, agility: 25, body: "hound", color: 0xe4e0d8, scale: 1.65, resist: { frost: 0.75 }, habitat: ["frostholm"], loot: ["bear pelt"] },
+  riekling: { name: "Riekling", level: 3, hp: 28, dmg: [3, 8], speed: 4.4, rate: 1.2, reach: 2.2, ar: 8, agility: 45, body: "riekling", color: 0x7aa0c8, scale: 0.62, humanoid: true, gold: [2, 20], resist: { frost: 0.5 }, habitat: ["frostholm", "barrow"] },
+  iceWraith: { name: "Ice Wraith", level: 6, hp: 55, dmg: [6, 12], speed: 5.8, rate: 1.1, reach: 2.2, ar: 6, agility: 60, body: "ghost", color: 0xb0e0ff, scale: 1, flying: true, undead: true, element: "frost", resist: { frost: 1, poison: 1 }, habitat: ["frostholm"], loot: ["ectoplasm"] },
+  draugr: { name: "Draugr", level: 5, hp: 60, dmg: [5, 12], speed: 3.4, rate: 0.95, reach: 2.3, ar: 16, agility: 30, body: "draugr", color: 0x6a7280, scale: 1.05, undead: true, element: "frost", resist: { frost: 0.75, poison: 1 }, habitat: ["barrow"], loot: ["bonemeal"] },
+  draugrLord: { name: "Draugr Deathlord", level: 11, hp: 140, dmg: [10, 22], speed: 3.6, rate: 1.0, reach: 2.5, ar: 28, agility: 40, body: "draugr", color: 0x4a5260, scale: 1.25, undead: true, element: "frost", caster: "frostbite", resist: { frost: 0.9, poison: 1 }, habitat: ["barrow"], loot: ["bonemeal"] },
   dagoth: { name: "Dagoth", level: 22, hp: 480, dmg: [18, 34], speed: 4.2, rate: 1.1, reach: 2.8, ar: 40, agility: 60, body: "dagoth", color: 0xc8a030, scale: 1.7, sixthHouse: true, caster: "fireball", resist: { fire: 0.75, frost: 0.25, shock: 0.25, poison: 1 }, habitat: [], boss: true },
 }
 

@@ -5,7 +5,7 @@ import { reserveQuestIds } from "../logic/quests.js"
 // Roguelike-style suspend save: one slot, written continuously while you play
 // and deleted when the run ends, so a death can't be undone by reloading.
 export const SAVE_KEY = "ashfall-run"
-export const SAVE_VERSION = 1
+export const SAVE_VERSION = 2 // 2: the larger world with the frozen isle
 
 export function readSave() {
   try {
@@ -67,6 +67,7 @@ function serializeDungeonState(ds) {
         dead: [...lv.dead],
         chests: lv.chests,
         explored: lv.explored ? Array.from(lv.explored).join("") : null,
+        feat: lv.feat || null,
       }
     }
   }
@@ -80,6 +81,7 @@ function restoreDungeonState(data) {
     for (const [n, lv] of Object.entries(st.levels)) {
       const level = { dead: new Set(lv.dead), chests: lv.chests || {} }
       if (lv.explored) level.explored = Uint8Array.from(lv.explored, ch => (ch === "1" ? 1 : 0))
+      if (lv.feat) level.feat = lv.feat
       out[id].levels[n] = level
     }
   }
@@ -91,7 +93,9 @@ export function serializeRun(game) {
   const area =
     game.area.kind === "dungeon"
       ? { kind: "dungeon", id: game.area.dungeon.id, level: game.area.levelIndex, returnPos: game.returnPos }
-      : { kind: "overworld" }
+      : game.area.kind === "interior"
+        ? { kind: "interior", town: game.area.town.id, building: game.area.building.idx, returnPos: game.returnPos }
+        : { kind: "overworld" }
   return {
     v: SAVE_VERSION,
     savedAt: Date.now(),
@@ -106,6 +110,8 @@ export function serializeRun(game) {
     journal: game.journal,
     main: game.main,
     knownTowns: [...game.knownTowns],
+    landmarks: game.landmarks,
+    isle: game.isle,
     trainedThisLevel: game.trainedThisLevel,
     merchantStock: [...game.merchantStock],
     dispositionMod: [...game.dispositionMod],
@@ -140,6 +146,8 @@ export function restoreRun(game, save) {
   game.journal = save.journal
   game.main = save.main
   game.knownTowns = new Set(save.knownTowns)
+  game.landmarks = save.landmarks || { found: [], state: {} }
+  game.isle = save.isle || { stage: 0 }
   game.trainedThisLevel = save.trainedThisLevel
   game.merchantStock = new Map(save.merchantStock)
   game.dispositionMod = new Map(save.dispositionMod)

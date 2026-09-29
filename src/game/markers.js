@@ -27,6 +27,14 @@ export function questTargets(game) {
       if (d && !d.cleared) out.push({ x: d.x, z: d.z, label: d.name, kind: "quest" })
     }
   }
+  // the frozen isle's story
+  const isle = game.isle?.stage || 0
+  if (isle === 1 || isle === 2) {
+    const d = world.dungeons.find(d => d.isleStory)
+    const elder = world.towns.find(t => t.isle)?.npcs.find(n => n.role === "elder")
+    if (isle === 1 && d) out.push({ x: d.x, z: d.z, label: `Horn of the Ancestors: ${d.name}`, kind: "quest" })
+    if (isle === 2 && elder) out.push({ x: elder.x, z: elder.z, label: `Return to ${elder.name}`, kind: "quest" })
+  }
   const main = game.main?.stage ?? 0
   if (main === 0) {
     const blade = world.startTown.npcs.find(n => n.role === "blade")

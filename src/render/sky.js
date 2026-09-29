@@ -90,10 +90,36 @@ export class Sky {
 
     this.skyColor = new THREE.Color()
     this.weather = "clear"
+    // lightning: a jagged bolt that flickers for a moment, and a sky flash
+    this.flashT = 0
+    this.nextBolt = 6
+    this.bolt = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: new THREE.Color(0xd8e0ff).multiplyScalar(4), fog: false }))
+    this.bolt.visible = false
+    this.bolt.frustumCulled = false
+    scene.add(this.bolt)
+    this.onThunder = null
+  }
+
+  strike(cp) {
+    const a = Math.random() * Math.PI * 2
+    const d = 120 + Math.random() * 280
+    const pts = []
+    let x = cp.x + Math.cos(a) * d
+    let z = cp.z + Math.sin(a) * d
+    for (let y = 160; y > cp.y - 10; y -= 12) {
+      pts.push(new THREE.Vector3(x, y, z))
+      x += (Math.random() - 0.5) * 14
+      z += (Math.random() - 0.5) * 14
+    }
+    this.bolt.geometry.setFromPoints(pts)
+    this.bolt.visible = true
+    this.flashT = 1
+    this.onThunder?.(d)
   }
 
   // hour: 0..24, regionFog: hex of the current region's daytime haze
-  update(dt, hour, camera, regionFog, fog) {
+  // redness: 0..1, how close you are to Red Mountain (the sky bleeds red)
+  update(dt, hour, camera, regionFog, fog, redness = 0) {
     const t = ((hour - 6) / 24) * Math.PI * 2 // sunrise at 6
     const sunH = Math.sin(t)
     const day = THREE.MathUtils.smoothstep(sunH, -0.18, 0.25)
@@ -102,19 +128,43 @@ export class Sky {
     const dayCol = new THREE.Color(regionFog)
     const duskCol = new THREE.Color(0xc0643a)
     this.skyColor.copy(night).lerp(dayCol, day).lerp(duskCol, dusk * 0.5)
+    if (redness > 0) this.skyColor.lerp(new THREE.Color(0x8a2a18).multiplyScalar(0.4 + day * 0.6), redness * 0.55)
     let visibility = 1
     if (this.weather === "ash" || this.weather === "blight") {
-      this.skyColor.lerp(new THREE.Color(this.weather === "blight" ? 0x8a3a2a : 0x7a5a42), 0.6 * (0.3 + day * 0.7))
-      visibility = 0.35
+      this.skyColor.lerp(new THREE.Color(this.weather === "blight" ? 0x8a3a2a : 0x7a5a42), 0.7 * (0.3 + day * 0.7))
+      visibility = 0.22
     } else if (this.weather === "rain") {
       this.skyColor.lerp(new THREE.Color(0x5a6068), 0.5)
       visibility = 0.6
+    } else if (this.weather === "storm") {
+      this.skyColor.lerp(new THREE.Color(0x353a42), 0.7)
+      visibility = 0.45
+    } else if (this.weather === "snow") {
+      this.skyColor.lerp(new THREE.Color(0xc8d0d8), 0.5 * (0.3 + day))
+      visibility = 0.6
+    } else if (this.weather === "blizzard") {
+      this.skyColor.lerp(new THREE.Color(0xd8e0e8), 0.75 * (0.3 + day * 0.7))
+      visibility = 0.2
     } else if (this.weather === "fog") {
       this.skyColor.lerp(new THREE.Color(0x9a9a98), 0.5 * (0.3 + day))
       visibility = 0.35
     } else if (this.weather === "cloudy") {
       this.skyColor.lerp(new THREE.Color(0x808890), 0.3)
       visibility = 0.85
+    }
+    // lightning in storms
+    if (this.weather === "storm") {
+      this.nextBolt -= dt
+      if (this.nextBolt <= 0) {
+        this.nextBolt = 4 + Math.random() * 10
+        this.strike(camera.getWorldPosition(new THREE.Vector3()))
+      }
+    }
+    if (this.flashT > 0) {
+      this.flashT = Math.max(0, this.flashT - dt * 3.5)
+      const f = this.flashT * (0.6 + 0.4 * Math.sin(this.flashT * 40))
+      this.skyColor.lerp(new THREE.Color(0xdde4ff), f * 0.55)
+      if (this.flashT < 0.6) this.bolt.visible = false
     }
     fog.color.copy(this.skyColor)
     this.skyUniforms.horizon.value.copy(this.skyColor)
@@ -143,24 +193,33 @@ export class Sky {
     const lightDir = sunH > -0.05 ? sunDir : new THREE.Vector3(Math.cos(mt), Math.max(0.3, Math.sin(mt)), -0.5).normalize()
     this.sun.position.copy(cp).addScaledVector(lightDir, 150)
     this.sun.target.position.copy(cp)
-    this.hemi.intensity = 0.35 + 0.95 * day
+    this.hemi.intensity = 0.35 + 0.95 * day + this.flashT * 2.5
     this.hemi.color.copy(this.skyColor).lerp(new THREE.Color(0xffffff), 0.4)
 
     // particles
-    const active = this.weather === "ash" || this.weather === "blight" || this.weather === "rain"
+    const w = this.weather
+    const active = w === "ash" || w === "blight" || w === "rain" || w === "storm" || w === "snow" || w === "blizzard"
     this.particles.visible = active
     if (active) {
-      const rain = this.weather === "rain"
-      this.particles.material.color.set(rain ? 0xa0b0c0 : this.weather === "blight" ? 0xb04a30 : 0x9a8a78)
-      this.particles.material.size = rain ? 0.08 : 0.2
+      const rain = w === "rain" || w === "storm"
+      const snow = w === "snow" || w === "blizzard"
+      this.particles.material.color.set(rain ? 0xa0b0c0 : snow ? 0xf4f8ff : w === "blight" ? 0xb04a30 : 0x9a8a78)
+      this.particles.material.size = rain ? 0.08 : snow ? (w === "blizzard" ? 0.16 : 0.12) : 0.26
       this.particles.position.set(cp.x, cp.y - 10, cp.z)
       const p = this.particlePos
+      const wind = w === "blizzard" ? 14 : w === "snow" ? 1.2 : 9
       for (let i = 0; i < p.length; i += 3) {
-        if (rain) p[i + 1] -= dt * 22
-        else {
-          p[i] += dt * 9
+        if (rain) {
+          p[i + 1] -= dt * (w === "storm" ? 28 : 22)
+          if (w === "storm") p[i] += dt * 5
+        } else if (snow) {
+          p[i] += dt * wind + Math.sin(p[i + 1] + i) * dt * 0.6
+          p[i + 1] -= dt * (w === "blizzard" ? 4 : 1.4)
+          p[i + 2] += dt * wind * 0.4
+        } else {
+          p[i] += dt * 11
           p[i + 1] -= dt * 1.5
-          p[i + 2] += dt * 4
+          p[i + 2] += dt * 5
         }
         if (p[i + 1] < 0) p[i + 1] += 30
         if (p[i] > 30) p[i] -= 60

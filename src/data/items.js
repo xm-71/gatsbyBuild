@@ -131,6 +131,8 @@ export const MISC_ITEMS = {
   "pearl": { value: 60, weight: 0.2, tags: ["cave", "coast"] },
   "raw glass": { value: 180, weight: 2, tags: ["cave"] },
   "raw ebony": { value: 250, weight: 10, tags: ["cave"] },
+  "wolf pelt": { value: 25, weight: 2, tags: ["wild"] },
+  "bear pelt": { value: 70, weight: 5, tags: ["wild"] },
   "diamond": { value: 250, weight: 0.2, tags: ["any"] },
   "ruby": { value: 200, weight: 0.2, tags: ["any"] },
   "emerald": { value: 150, weight: 0.2, tags: ["any"] },

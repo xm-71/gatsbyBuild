@@ -16,6 +16,8 @@ export function buildTerrain(world, chunks = computeTerrainChunks(world, Q.terra
     tMud: { value: T("mud").map },
     tVolc: { value: T("volcanic").map },
     tDirt: { value: T("dirt").map },
+    tSnow: { value: T("snow").map },
+    tRoad: { value: T("road").map },
     nGrass: { value: T("grass").normalMap },
     nAsh: { value: T("ash").normalMap },
     nDirt: { value: T("dirt").normalMap },
@@ -26,13 +28,14 @@ export function buildTerrain(world, chunks = computeTerrainChunks(world, Q.terra
   material.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, uniforms)
     shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nattribute vec4 splatA;\nattribute vec4 splatB;\nvarying vec4 vSplatA;\nvarying vec4 vSplatB;\nvarying vec2 vSplatUv;\nvarying vec3 vWPos;")
-      .replace("#include <uv_vertex>", "#include <uv_vertex>\nvSplatA = splatA;\nvSplatB = splatB;\nvSplatUv = uv;\nvWPos = (modelMatrix * vec4(position, 1.0)).xyz;")
+      .replace("#include <common>", "#include <common>\nattribute vec4 splatA;\nattribute vec4 splatB;\nattribute vec2 splatC;\nvarying vec4 vSplatA;\nvarying vec4 vSplatB;\nvarying vec2 vSplatC;\nvarying vec2 vSplatUv;\nvarying vec3 vWPos;")
+      .replace("#include <uv_vertex>", "#include <uv_vertex>\nvSplatA = splatA;\nvSplatB = splatB;\nvSplatC = splatC;\nvSplatUv = uv;\nvWPos = (modelMatrix * vec4(position, 1.0)).xyz;")
     shader.fragmentShader = shader.fragmentShader
       .replace(
         "#include <common>",
         `#include <common>
-uniform sampler2D tGrass, tAsh, tRock, tSand, tMud, tVolc, tDirt, nGrass, nAsh, nDirt;
+uniform sampler2D tGrass, tAsh, tRock, tSand, tMud, tVolc, tDirt, tSnow, tRoad, nGrass, nAsh, nDirt;
+varying vec2 vSplatC;
 uniform float uTime;
 varying vec4 vSplatA;
 varying vec4 vSplatB;
@@ -60,7 +63,10 @@ if (vSplatA.w > 0.01) sc += spl(tSand, suv, suv2) * vSplatA.w;
 if (vSplatB.x > 0.01) sc += spl(tMud, suv, suv2) * vSplatB.x;
 if (vSplatB.y > 0.01) sc += spl(tVolc, suv, suv2) * vSplatB.y;
 if (vSplatB.z > 0.01) sc += spl(tDirt, suv, suv2) * vSplatB.z;
+if (vSplatC.x > 0.01) sc += spl(tSnow, suv, suv2) * vSplatC.x;
+// roads overlay whatever lies beneath, fraying at the edges
 float macro = texture2D(tDirt, vSplatUv * 0.027).g;
+if (vSplatC.y > 0.01) sc = mix(sc, texture2D(tRoad, suv * 1.3).rgb, smoothstep(0.1, 0.6, vSplatC.y * (0.75 + macro * 0.5)));
 diffuseColor.rgb *= sc * (0.75 + macro * 0.6) * (1.0 - vSplatB.w * 0.7);
 float wd = ${SEA_LEVEL.toFixed(2)} - vWPos.y;
 if (wd > 0.0) {
@@ -92,6 +98,7 @@ normal = normalize( tbn * mapN );`
     geo.setAttribute("color", new THREE.BufferAttribute(c.col, 3))
     geo.setAttribute("splatA", new THREE.BufferAttribute(c.sA, 4))
     geo.setAttribute("splatB", new THREE.BufferAttribute(c.sB, 4))
+    geo.setAttribute("splatC", new THREE.BufferAttribute(c.sC, 2))
     geo.setIndex(new THREE.BufferAttribute(c.idx, 1))
     geo.computeBoundingSphere()
     const mesh = new THREE.Mesh(geo, material)

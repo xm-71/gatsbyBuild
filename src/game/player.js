@@ -20,8 +20,9 @@ const DUNGEON_SURFACE = { cave: "gravel", tomb: "stone", dwemer: "metal", daedri
 export function surfaceUnder(game) {
   const pc = game.pc
   const area = game.area
-  if (pc.swimming) return "water"
+  if (pc.swimming || pc.wading) return "water"
   if (area.kind === "dungeon") return DUNGEON_SURFACE[area.dungeon.type] || "stone"
+  if (area.kind === "interior") return area.town.style === "imperial" || area.layout.kind === "temple" ? "stone" : area.town.style === "ashlander" ? "grass" : "wood"
   if (pc.pos.y < SEA_LEVEL + 0.15) return "water"
   const w = game.world
   if (pc.pos.y > w.heightAt(pc.pos.x, pc.pos.z) + 0.4) return "wood" // docks, stairs and floors
@@ -80,7 +81,7 @@ export function updatePlayer(game, dt) {
   if (moving) wish.normalize()
   const sprint = moving && (inp.action("sprint") || inp.down("ShiftRight")) && c.fatigue > 3 && !pc.sneaking
   pc.sprinting = sprint
-  let speed = moveSpeed(c) * (sprint ? 1.65 : 1) * (pc.sneaking ? 0.5 : 1) * (pc.swimming ? 0.6 : 1) * (c.fatigue <= 0 ? 0.7 : 1)
+  let speed = moveSpeed(c) * (sprint ? 1.65 : 1) * (pc.sneaking ? 0.5 : 1) * (pc.swimming ? 0.6 : 1) * (pc.wading ? 0.6 : 1) * (c.fatigue <= 0 ? 0.7 : 1)
   if (pc.charging) speed *= 0.7
   const accel = pc.onGround || pc.swimming ? 12 : 2.5
   pc.vel.x += (wish.x * speed - pc.vel.x) * Math.min(1, accel * dt)
@@ -162,7 +163,7 @@ export function updatePlayer(game, dt) {
       pc.onGround = true
     } else pc.onGround = false
   }
-  if (area.kind === "dungeon" && pc.pos.y + 1.7 > area.height) {
+  if (area.kind !== "overworld" && pc.pos.y + 1.7 > area.height) {
     pc.pos.y = area.height - 1.7
     pc.vel.y = Math.min(0, pc.vel.y)
   }
@@ -506,7 +507,7 @@ function applySelfSpell(game, spell) {
       case "teleport": {
         const towns = game.world.towns.filter(t => (e.to === "temple" ? t.hasTemple : t.hasFort))
         const pool = towns.length ? towns : game.world.towns
-        const from = game.area.kind === "dungeon" ? game.returnPos : game.pc.pos
+        const from = game.area.kind !== "overworld" ? game.returnPos : game.pc.pos
         const nearest = [...pool].sort((a, b) => Math.hypot(a.x - from.x, a.z - from.z) - Math.hypot(b.x - from.x, b.z - from.z))[0]
         game.teleportToTown(nearest)
         game.msg(`You are whisked away to ${nearest.name}.`, "#a0c0ff")
@@ -656,6 +657,8 @@ function activate(game, it) {
       return game.ui.openDialogue(it.ref)
     case "door":
       return game.enterDungeon(it.ref)
+    case "use":
+      return it.act(game)
     case "stairsUp":
       if (game.area.levelIndex === 0) return game.exitDungeon()
       return game.loadDungeonLevel(game.area.dungeon, game.area.levelIndex - 1, true)
@@ -705,7 +708,7 @@ function tryRest(game) {
   const c = game.char
   const near = game.area.enemies.some(e => !e.dead && e.aware && e.pos.distanceTo(game.pc.pos) < 40)
   if (near) return game.msg("You cannot rest with enemies nearby.", "#ff9a7a")
-  const inTown = game.area.kind === "overworld" && game.area.townAt(game.pc.pos.x, game.pc.pos.z)
+  const inTown = game.area.kind === "interior" || (game.area.kind === "overworld" && game.area.townAt(game.pc.pos.x, game.pc.pos.z))
   game.ui.openRest(inTown ? 0 : game.area.kind === "dungeon" ? 0.35 : 0.25)
   void canLevelUp
 }

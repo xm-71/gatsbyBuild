@@ -18,7 +18,18 @@ export function npcName(rng, race) {
   }
 }
 
-export function placeName(rng, used = new Set()) {
+const NORD_A = ["Skal", "Thir", "Hrot", "Frost", "Wolf", "Isin", "Brod", "Kolb", "Rav", "Hjal", "Storm", "Svar"]
+const NORD_B = ["heim", "stad", "vik", "holm", "garth", "mund", "fjell", "rik"]
+
+export function placeName(rng, used = new Set(), style = null) {
+  if (style === "nord")
+    for (let i = 0; i < 50; i++) {
+      const name = rng.pick(NORD_A) + rng.pick(NORD_B)
+      if (!used.has(name)) {
+        used.add(name)
+        return name
+      }
+    }
   for (let i = 0; i < 50; i++) {
     const a = rng.pick(N.PLACE_A)
     const b = rng.pick(N.PLACE_B)
@@ -37,6 +48,7 @@ export function dungeonName(rng, type, used = new Set()) {
     if (type === "dwemer") name = rng.pick(N.DWEMER_A) + rng.pick(N.DWEMER_B)
     else if (type === "daedric") name = `${rng.pick(N.DAEDRIC_A)}${rng.pick(N.DAEDRIC_B)} Shrine`.replace(/\s+/g, " ")
     else if (type === "tomb") name = `${rng.pick(N.TOMB_FAMILIES)} Ancestral Tomb`
+    else if (type === "barrow") name = `${rng.pick(NORD_A)}${rng.pick(["mund", "grim", "vald", "hal"])} Barrow`
     else if (type === "citadel") name = "Dagoth Ur Citadel"
     else name = `${placeName(rng)} ${rng.pick(N.CAVE_SUFFIX)}`
     if (!used.has(name)) {

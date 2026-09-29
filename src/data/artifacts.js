@@ -84,6 +84,12 @@ export const ARTIFACTS = {
     unique: "blinding", amount: 0.8,
     lore: "Boots that make you fly across the land, at the cost of seeing clearly what you swing at.",
   },
+  // the frozen isle's reward (never placed in dungeons)
+  stalhrim: {
+    name: "Ancestor's Stalhrim Blade", kind: "weapon", base: "longsword", material: "glass", color: 0xb8e8ff, damage: [18, 34],
+    enchant: { key: "frost", element: "frost", amount: 14 }, unique: "paralyze", chance: 0.08, reward: true,
+    lore: "Enchanted ice, forged by the village smiths of the frozen isle and given to those who return the Horn of the Ancestors.",
+  },
 }
 
-export const ARTIFACT_IDS = Object.keys(ARTIFACTS)
+export const ARTIFACT_IDS = Object.keys(ARTIFACTS).filter(id => !ARTIFACTS[id].reward)
